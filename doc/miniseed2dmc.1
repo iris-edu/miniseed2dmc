@@ -1,0 +1,155 @@
+.TH MSEEDSCAN2DALI 1 2008/01/17
+.SH NAME
+mseedscan2dali \- Scan Mini-SEED files and send to DataLink server
+.SH SYNOPSIS
+.nf
+mseedscan2dali [options] [-d dir] ... ORB
+
+.fi
+.SH DESCRIPTION
+\fBmseedscan2dali\fP recursively scans directories and sends any
+Mini-SEED data records it finds to a DataLink server.  During each
+pass of the directory tree new files are discovered and previously
+seen files are checked for appended records.
+
+See the \fBNOTES\fP section for more details.
+
+.SH OPTIONS
+
+.IP "-V"
+Print the program version and exit.
+
+.IP "-h"
+Print the program help/usage and exit.
+
+.IP "-v"
+Be more verbose.  This flag can be used multiple times ("-v -v" or 
+"-vv") for more verbosity.
+
+.IP "-n"
+During the initial scan of files do not send data to the ORB from
+files not found in the state file.  In other words, skip the data
+records in any newly discovered file during the initial scan.  This is
+useful for getting the scanning back up to the current state of the
+files quickly.  As this option has the potential to skip data it
+should be used with caution.
+
+.IP "-z"
+During the initial scan of files do not send data to the ORB from any
+files if a state file is specified but not found.  In other words,
+skip all data records discovered during the initial scan.  This is
+useful for getting the scanning back up to the current state of the
+files quickly.  As this option has the potential to skip data it
+should be used with caution.
+
+.IP "-1"
+Quit after the first scan of all target directories.
+
+.IP "-L \fIscans\fR"
+Print I/O statistics after the specified number of \fIscans\fR.
+Essentially this is a count of the number of files processed, records
+read from the files and written to the ORB.
+
+.IP "-BL \fIdays\fR"
+Skip files with a BUD file name scheme where the file name indicates
+that the data is more then \fIdays\R old.  When reading BUD-style files
+this saves stat() calls on many files that are older than desired, thus
+reducing overall system I/O.
+
+.IP "-s \fIsecs\fR"
+Specify interval to sleep in-between scans in seconds, default is none.
+
+.IP "-sz \fIsecs\fR"
+Specify interval to sleep in-between scans (in seconds) when no
+records were read during the previous scan, default is none.
+
+.IP "-i \fIdelay\fR"
+Check idle files every 'delay' intervals, default is 60 intervals.
+See \fBNOTES\fP section for a description of idle files.
+
+.IP "-I \fIsecs\fR"
+Treat a file as idle when it has not been modified for this many
+seconds, default is 7200 seconds.  See \fBNOTES\fP section for more a
+description of idle files.
+
+.IP "-Q \fIsecs\fR"
+Treat a file as quiet when it has not been modified for this many
+seconds, default is to never consider files quiet.  Warning, quiet
+files will never be checked again.  See \fBNOTES\fP section for a
+description of quiet files.
+
+.IP "-T \fInsecs\fR"
+Specify the number of nanoseconds to sleep after sending each
+Mini-SEED record to the ORB, default is 100 nanoseconds.
+
+.IP "-f \fImax\fR"
+Specify the maximum number of records to read from a give file during
+a scan, default is 100 records, 0 to disable.  This limit keeps the
+program from dumping the entire contents of a file with many new
+records into the ORB at once.  This option will not cause any records
+to be skipped.
+
+.IP "-r \fIlevel\fR"
+Specify the maximum number of directories to recurse into, default is
+3 levels.
+
+.IP "-M \fImatch\fR"
+Specify a regular expression that must match any given file name for
+it to be processed.  File names are relative to the base directory
+under which they are found.  By default all files found are processed.
+
+.IP "-R \fIreject\fR"
+Specify a regular expression that must \fInot\fP match any given file
+name for it to be processed.  File names are relative to the base
+directory under which they are found.  By default all files found are
+processed.
+
+.IP "-S \fIstatefile[:int]\fR"
+If a \fIstatefile\fR is specified, the state of the program will be
+saved during an orderly shutdown.  On startup, the program will
+attempt to read the specified \fIstatefile\fR allowing it to start
+scanning files where it left off.  Intermediate state saves can be
+controlled with the \fI:int\fR value which specifies the interval in
+seconds at which to save the state information, default interval is
+300 seconds.
+
+.IP "\fIringserver\fR"
+A required argument.  Specifies the location of the DataLink
+ringserver in [host]:[port] format.  If 'host' is omitted 'localhost'
+is assumed, if 'port' is omitted port 16000 is assumed.
+
+.SH "NOTES"
+This program is inteded to be run continuously on data files which
+might be growing (i.e. data records are being appended).  The program
+will not perform any kind of sorting, data records are forwarded as
+the files they are contained in are discovered.  In order to feed data
+in time-order to the ringserver the program must discover the files in
+the proper order.  In a real-time collection system writing Mini-SEED
+files as the data is collected this characteristic is a natural
+coincidence.
+
+The file scanning logic employs the concept of active, idle and quiet
+files.  Files that have not been modified for specified amounts of
+time are considered idle or quiet.  The idle files will not be checked
+on every scan, instead a specified number of scans will be skipped for
+each idle file.  The quiet files will never be checked ever again.
+
+Any files discovered that did not contain any Mini-SEED records are
+logged and the file is ignored during any subsequent scans.
+
+Broken symbolic links are quietly skipped.  If they are eventually
+re-connected to something the something will be scanned as expected.
+
+The directory separator is assumed to be '/'.
+
+Currently, this program will only work with 512-byte Mini-SEED
+records.
+
+Upon receiving a SIGUSR1 signal the program will print the current
+file list to standard error.
+
+.SH AUTHOR
+.nf
+Chad Trabant
+IRIS Data Management Center
+.fi
