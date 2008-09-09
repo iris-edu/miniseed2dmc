@@ -180,7 +180,7 @@ main (int argc, char** argv)
 		  iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
 				      ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
 		  
-		  lprintf (0, "%s: sent in %g seconds (%g bytes/second, %g records/second)",
+		  lprintf (0, "%s: sent in %.1f seconds (%.1f bytes/second, %.1f records/second)",
 			   file->name, iostatsinterval,
 			   file->bytecount/iostatsinterval,
 			   file->recordcount/iostatsinterval);
@@ -206,7 +206,7 @@ main (int argc, char** argv)
       iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
 			  ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
       
-      lprintf (0, "Time elapsed: %g seconds (%g bytes/second, %g records/second)",
+      lprintf (0, "Time elapsed: %.1f seconds (%.1f bytes/second, %.1f records/second)",
 	       iostatsinterval,
 	       totalbytes/iostatsinterval,
 	       totalrecords/iostatsinterval);
@@ -253,7 +253,7 @@ processfile (FileLink *file)
   
   /* Read all data records from file and send to the server */
   while ( ! stopsig &&
-	  (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) != MS_NOERROR )
+	  (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
     {
       /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
       msr_srcname (msr, streamid, 0);
@@ -565,7 +565,7 @@ processparam (int argcount, char **argvec)
   
   /* Initialize the verbosity for the ms_log and dl_log functions */
   ms_loginit (&lprintf0, "", &lprintf0, "");
-  dl_loginit (verbose, &lprintf0, "", &lprintf0, "");
+  dl_loginit (verbose-2, &lprintf0, "", &lprintf0, "");
   
   /* Report the program version */
   lprintf (0, "%s version: %s", PACKAGE, VERSION);
@@ -648,7 +648,7 @@ addfile (char *filename)
   /* Stat file */
   if ( stat (filename, &st) )
     {
-      lprintf (0, "ERROR: Could not find '%s': %s", filename, strerror(errno));
+      lprintf (0, "Error: could not find '%s': %s", filename, strerror(errno));
       return -1;
     }
   
