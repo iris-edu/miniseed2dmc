@@ -37,71 +37,55 @@
 #include <libmseed.h>
 #include <libdali.h>
 
-#include "rbtree.h"
-#include "stack.h"
 #include "seedutil.h"
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.251"
+#define VERSION "2008.252"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
 
-/* The FileKey and FileNode structures form the key and data elements
- * of a balanced tree that is used to keep track of all files being
- * processed.
- */
-
-/* Structure used as the key for B-tree of file entries (FileNode) */
-typedef struct filekey {
-  ino_t inode;           /* Inode number, assumed to be unsigned */
-  char filename[1];      /* File name, sized appropriately */
-} FileKey;
-
-/* Structure used as the data for B-tree of file entries */
-typedef struct filenode {
-  off_t offset;          /* Last file read offset, must be signed */
-} FileNode;
-
 /* Linkable structure to hold input file list */
 typedef struct FileLink_s {
   struct FileLink_s *next;
-  int accesserr;
-  char filename[1];
+  off_t offset;              /* Last file read offset, must be signed */
+  off_t size;                /* Total size of file */
+  uint64_t bytecount;        /* Count of bytes sent */
+  uint64_t recordcount;      /* Count of records sent */
+  char name[1];              /* File name, complete path to access */
 } FileLink;
 
 
-static FileLink *inputlist = 0;    /* Linked list of input files */
-static char   *listfile    = 0;    /* Input list file */
-static RBTree *filetree    = 0;    /* Working list of scanned files in a tree */
+static FileLink *filelist  = 0;    /* Linked list of input files */
+static FileLink *lastfile  = 0;    /* Last entry of input files list */
 
 static char  stopsig       = 0;    /* Stop/termination signal */
 static int   verbose       = 0;    /* Verbosity level */
-static int   writeack      = 0;    /* Flag to control the request for write acks */
+static int   writeack      = 1;    /* Flag to control the request for write acks */
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
 static int   iostats       = 0;    /* Output IO stats */
 static int   quiet         = 0;    /* Quiet mode */
-static int   stateint      = 300;  /* State saving interval in seconds */
+static int   quitonerror   = 0;    /* Quit program on connection errors */
+static int   reconnect     = 60;   /* Reconnect delay if not quittng on errors */
 static char *statefile     = 0;    /* State file for saving/restoring time stamps */
 
-static int scanfiles (char *targetdir, char *basedir, int level, time_t scantime);
-static FileNode *findfile (FileKey *fkey);
-static FileNode *addfile (ino_t inode, char *filename, time_t modtime);
-static off_t  processfile (char *filename, FileNode *fnode, off_t newsize, time_t newmodtime);
-static void   prunefiles (time_t scantime);
+static uint64_t inputbytes = 0;    /* Total size for all input files */
+static uint64_t totalbytes = 0;    /* Track count of total bytes sent */
+static uint64_t totalrecords = 0;  /* Track count of total records sent */
+static uint64_t totalfiles = 0;    /* Track count of total files sent */
+static MSTraceGroup *traces = 0;   /* Track all trace segments sent */
+
+static int    adddir (char *targetdir, char *basedir, int level);
+static int    processfile (FileLink *file);
 static void   printfilelist (FILE *fd);
 static int    savestate (char *statefile);
 static int    recoverstate (char *statefile);
-static int    sendrecord (char *record, int reclen);
 static int    processparam (int argcount, char **argvec);
 static char  *getoptval (int argcount, char **argvec, int argopt);
-static void   adddir (char *dirname);
-static void   processdirfile (char *filename);
-static int    keycompare (const void *a, const void *b);
-static time_t calcdaytime (int year, int day);
-static time_t budfiledaytime (char *filename);
+static int    addfile (char *filename);
+static int    processlistfile (char *filename);
 static void   term_handler();
 static void   print_handler();
 static void   lprintf0 (char *message);
@@ -113,10 +97,13 @@ static DLCP *dlconn;
 int
 main (int argc, char** argv)
 {
-  FileLink *flp;
-  time_t scantime, statetime;
-  struct timespec tstart;
+  FileLink *file;
+  struct timeval procstart;
+  struct timeval filestart;
+  struct timeval now;
+  struct timespec rcsleep;
   double iostatsinterval;
+  int pret;
   
   /* Signal handling using POSIX routines */
   struct sigaction sa;
@@ -135,124 +122,95 @@ main (int argc, char** argv)
   sigaction(SIGHUP, &sa, NULL);
   sigaction(SIGPIPE, &sa, NULL);
   
-  filetree = RBTreeCreate (keycompare, free, free);
-    
   /* Process command line parameters */
-  if (processparam (argc, argv) < 0)
+  if ( processparam (argc, argv) < 0 )
     return 1;
   
-  /* Connect to server */
-  if ( dl_connect (dlconn) < 0 )
-    {
-      fprintf (stderr, "Error connecting to server\n");
-      return -1;
-    }
+  /* Configure reconnection sleep time */
+  rcsleep.tv_sec = reconnect;
+  rcsleep.tv_nsec = 0;
   
+  /* Initialize trace segment tracking */
+  traces = mst_initgroup (traces);
+  
+  /* Set processing start time */
   if ( iostats )
-    iostatscount = iostats;
+    gettimeofday (&procstart, NULL);
   
   /* Start scan sequence */
-  while ( stopsig == 0 )
+  while ( ! stopsig )
     {
-      dlp = dirlist;
+      file = filelist;
       
-      scantime = time(NULL);
-      
-      scanrecordsread = 0;
-      
-      if ( iostats && iostats == iostatscount )
+      /* Connect to server */
+      if ( dl_connect (dlconn) < 0 )
 	{
-	  gettimeofday (&scanstarttime, NULL);
-	  scanfileschecked = 0;
-	  scanfilesread = 0;
-	  scanrecordswritten = 0;
+	  lprintf (0, "Error connecting to server\n");
 	}
-      
-      while ( dlp != 0 && stopsig == 0 )
+      else
 	{
-	  /* Check for base directory existence */
-	  if ( access (dlp->dirname, R_OK) )
+	  while ( file && ! stopsig )
 	    {
-	      /* Only log error if this is a change */
-	      if ( dlp->accesserr == 0 )
-		lprintf (0, "Cannot read base directory %s: %s", dlp->dirname, strerror(errno));
+	      if ( iostats )
+		{
+		  gettimeofday (&filestart, NULL);
+		}
 	      
-	      dlp->accesserr = 1;
-	    }
-	  else
-	    {
-	      if ( dlp->accesserr == 1 )
-		dlp->accesserr = 0;
+	      if ( (pret = processfile (file)) )
+		{
+		  /* Shutdown if the error was a file read */
+		  if ( pret == -2 )
+		    stopsig = 1;
+		  
+		  break;
+		}
 	      
-	      if ( scanfiles (dlp->dirname, dlp->dirname, maxrecur, scantime) == -2 )
+	      /* If that was the last file set the stop signal */
+	      if ( ! file->next )
 		stopsig = 1;
+	      /* Otherwise inrement to the next file in the list */
+	      else
+		file = file->next;
+	      
+	      if ( iostats )
+		{
+		  /* Determine run time since filestart was set */
+		  gettimeofday (&now, NULL);
+		  
+		  iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+				      ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
+		  
+		  lprintf (0, "%s: sent in %g seconds (%g bytes/second, %g records/second)",
+			   file->name, iostatsinterval,
+			   file->bytecount/iostatsinterval,
+			   file->recordcount/iostatsinterval);
+		}
 	    }
-	  
-	  dlp = dlp->next;
 	}
       
-      if ( stopsig == 0 )
-	{
-	  /* Prune files that were not found from the filelist */
-	  prunefiles (scantime);
-	  
-	  /* Save intermediate state file */
-	  if ( statefile && stateint && (scantime - statetime) > stateint )
-	    {
-	      savestate (statefile);
-	      statetime = scantime;
-	    }
-	  
-	  /* Re-read directory list file */
-	  if ( dirfile && dirfilecount == 0 )
-	    {
-	      processdirfile (dirfile->filename);
-	      dirfilecount = DIRFILEINT;
-	    }
-	  else
-	    {
-	      dirfilecount--;
-	    }
-	  
-	  /* Reset the next new flag, the first scan is now complete */
-	  if ( nextnew ) nextnew = 0;
-	  
-	  /* Sleep for specified interval */
-	  if ( scansleep )
-	    nanosleep (&treq, &trem);
-
-	  /* Sleep for specified interval if no records were read */
-	  if ( scansleep0 && scanrecordsread == 0 )
-	    nanosleep (&treq0, &trem);
-	}
-      
-      if ( iostats && iostatscount <= 1 )
-	{
-          /* Determine run time since scanstarttime was set */
-	  gettimeofday (&scanendtime, NULL);
-	  
-	  iostatsinterval = ( ((double)scanendtime.tv_sec + (double)scanendtime.tv_usec/1000000) -
-			      ((double)scanstarttime.tv_sec + (double)scanstarttime.tv_usec/1000000) );
-	  
-	  lprintf (0, "STAT: Time: %g seconds for %d scan(s) (%g seconds/scan)",
-                   iostatsinterval, iostats, iostatsinterval/iostats);
-	  lprintf (0, "STAT: Files checked: %d, read: %d (%g read/sec)",
-		   scanfileschecked, scanfilesread, scanfilesread/iostatsinterval);
-	  lprintf (0, "STAT: Records read: %d, written: %d (%g written/sec)",
-		   scanrecordsread, scanrecordswritten, scanrecordswritten/iostatsinterval);
-
-          /* Reset counter */
-          iostatscount = iostats;
-	}
-      else if ( iostats )
-        {
-          iostatscount--;
-        }
-
-      /* Quit if only doing one scan */
-      if ( onescan )
+      /* Quit on connection errors if requested */
+      if ( ! stopsig && quitonerror )
 	break;
+      
+      /* Sleep before reconnecting */
+      if ( ! stopsig )
+	nanosleep (&rcsleep, NULL);
+      
     } /* End of main scan sequence */
+  
+  if ( iostats )
+    {
+      /* Determine run time since procstart was set */
+      gettimeofday (&now, NULL);
+      
+      iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+			  ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
+      
+      lprintf (0, "Time elapsed: %g seconds (%g bytes/second, %g records/second)",
+	       iostatsinterval,
+	       totalbytes/iostatsinterval,
+	       totalrecords/iostatsinterval);
+    }
   
   /* Shut down the connection to the server */
   if ( dlconn->link != -1 )
@@ -262,486 +220,87 @@ main (int argc, char** argv)
   if ( statefile )
     savestate (statefile);
   
+  /* Print trace coverage sent */
+  if ( ! quiet && traces )
+    mst_printtracelist (traces, 0, 1, 0);
+  
   return 0;
 }  /* End of main() */
 
 
 /***************************************************************************
- * scanfiles:
- *
- * Scan a directory and recursively drop into sub-directories up to the 
- * maximum recursion level.
- *
- * When initially called the targetdir and basedir should be the same,
- * either an absolute or relative path.  During directory recursion
- * these values are maintained such that they are either absolute
- * paths or targetdir is a relatively path from the current working
- * directory (which changes during recursion) and basedir is a
- * relative path from the initial directory.
- *
- * If the FileNode->offset of an existing entry is -1 skip the file,
- * this happens when there was trouble reading the file, the contents
- * were not Mini-SEED on a previous attempt, etc.
- *
- * Return 0 on success and -1 on error and -2 on fatal error.
- ***************************************************************************/
-static int
-scanfiles (char *targetdir, char *basedir, int level, time_t scantime)
-{
-  static int dlevel = 0;
-  FileNode *fnode;
-  FileKey *fkey;
-  char filekeybuf[sizeof(FileKey)+MAX_FILENAME_LENGTH]; /* Room for fkey */
-  struct stat st;
-  struct dirent *de;
-  int rrootdir;
-  EDIR *dir;
-  
-  fkey = (FileKey *) &filekeybuf;
-  
-  lprintf (3, "Processing directory '%s'", basedir);
-  
-  if ( (rrootdir = open (".", O_RDONLY, 0)) == -1 )
-    {
-      if ( ! (stopsig && errno == EINTR) )
-	lprintf (0, "Error opening current working directory");
-      return -1;
-    }
-  
-  if ( chdir (targetdir) )
-    {
-      if ( ! (stopsig && errno == EINTR) )
-	lprintf (0, "Cannot change to directory %s: %s", targetdir, strerror(errno));
-      close (rrootdir);
-      return -1;
-    }
-  
-  if ( (dir = eopendir (".")) == NULL )
-    {
-      lprintf (0, "Cannot open directory %s: %s", targetdir, strerror(errno));
-      
-      if ( fchdir (rrootdir) )
-	{
-	  lprintf (0, "Cannot change to relative root directory: %s", strerror(errno));
-	}
-      
-      close (rrootdir);
-      return -1;
-    }
-  
-  while ( stopsig == 0 && (de = ereaddir(dir)) != NULL )
-    {
-      int filenamelen;
-      
-      /* Skip "." and ".." entries */
-      if ( !strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") )
-	continue;
-      
-      /* BUD file name latency check */
-      if ( budlatency )
-	{
-	  time_t budfiletime = budfiledaytime (de->d_name);
-	  
-	  /* Skip this file if the BUD file name is more than budlatency days old */
-	  if ( budfiletime && ((currentday-budfiletime) > (budlatency * 86400)) )
-	    {
-	      if ( verbose > 1 )
-		lprintf (0, "Skipping due to BUD file name latency: %s", de->d_name);
-	      continue;
-	    }
-	}
-      
-      /* Build a FileKey for this file */
-      fkey->inode = de->d_ino;
-      filenamelen = snprintf (fkey->filename, sizeof(filekeybuf) - sizeof(FileKey),
-			      "%s/%s", basedir, de->d_name);
-      
-      /* Make sure the filename was not truncated */
-      if ( filenamelen >= (sizeof(filekeybuf) - sizeof(FileKey) - 1) )
-	{
-	  lprintf (0, "Directory entry name beyond maximum of %d characters, skipping:",
-		   (sizeof(filekeybuf) - sizeof(FileKey) - 1));
-	  lprintf (0, "  %s", de->d_name);
-	  continue;
-	}
-      
-      /* Search for a matching entry in the filetree */
-      if ( (fnode = findfile (fkey)) )
-	{
-	  /* Check if the file is permanently skipped */
-	  if ( fnode->offset == -1 )
-	    {
-	      fnode->scantime = scantime;
-	      continue;
-	    }
-	  
-	  /* Check if file has triggered a delayed check */
-	  if ( fnode->idledelay > 0 )
-	    {
-	      fnode->scantime = scantime;
-	      fnode->idledelay--;
-	      continue;
-	    }
-	}
-      
-      /* Stat the file */
-      if ( lstat (de->d_name, &st) < 0 )
-	{
-	  if ( ! (stopsig && errno == EINTR) )
-	    lprintf (0, "Cannot stat %s: %s", fkey->filename, strerror(errno));
-	  continue;
-	}
-      
-      /* If symbolic link stat the real file, if it's a broken link continue */
-      if ( S_ISLNK(st.st_mode) )
-	{
-	  if ( stat (de->d_name, &st) < 0 )
-	    {
-	      /* Interruption signals when the stop signal is set should break out */
-	      if ( stopsig && errno == EINTR )
-		break;
-	      
-	      /* Log an error if the error is anything but a disconnected link */
-	      if ( errno != ENOENT )
-		lprintf (0, "Cannot stat %s: %s", fkey->filename, strerror(errno));
-	      else
-		continue;
-	    }
-	}
-      
-      /* If directory recurse up to the limit */
-      if ( S_ISDIR(st.st_mode) )
-	{
-	  if ( dlevel < level )
-	    {
-	      lprintf (4, "Recursing into %s", fkey->filename);
-	      
-	      dlevel++;
-	      if ( scanfiles (de->d_name, fkey->filename, level, scantime) == -2 )
-		return -2;
-	      dlevel--;
-	    }
-	  continue;
-	}
-      
-      /* Increment files found counter */
-      if ( iostats )
-	scanfileschecked++;
-      
-      /* Do regex matching if an expression was specified */
-      if ( fnmatch != 0 )
-	if ( regexec (fnmatch, de->d_name, (size_t) 0, NULL, 0) != 0 )
-	  continue;
-      
-      /* Do regex rejecting if an expression was specified */
-      if ( fnreject != 0 )
-	if ( regexec (fnreject, de->d_name, (size_t) 0, NULL, 0) == 0 )
-	  continue;
-      
-      /* Sanity check for a regular file */
-      if ( !S_ISREG(st.st_mode) )
-	{
-	  lprintf (0, "%s is not a regular file", fkey->filename);
-	  continue;
-	}
-      
-      /* Sanity check that the dirent inode and stat inode are the same */
-      if ( st.st_ino != de->d_ino )
-	{
-	  lprintf (0, "Inode numbers from dirent and stat do not match for %s\n", fkey->filename);
-	  lprintf (0, "  dirent: %llu  VS  stat: %llu\n",
-		   (unsigned long long int) de->d_ino, (unsigned long long int) st.st_ino);
-	  continue;
-	}
-      
-      lprintf (3, "Checking file %s", fkey->filename);
-      
-      /* If the file has never been seen add it to the list */
-      if ( ! fnode )
-	{
-	  /* Add new file to tree setting modtime to one second in the
-	   * past so we are triggered to look at this file the first time. */
-	  if ( ! (fnode = addfile (fkey->inode, fkey->filename, st.st_mtime - 1)) )
-	    {
-	      lprintf (0, "Error adding %s to file list", fkey->filename);
-	      continue;
-	    }
-        }
-	  
-      /* Only update the offset if skipping the first scan, otherwise process */
-      if ( nextnew )
-        fnode->offset = st.st_size;
-      
-      /* Check if the file is quiet and mark to always skip if true */
-      if ( quietsec && st.st_mtime < (scantime - quietsec) )
-	{
-	  lprintf (2, "Marking file as quiet, no processing: %s", fkey->filename);
-	  fnode->offset = -1;
-	}
-      
-      /* Otherwise check if the file is idle and set idledelay appropriately */
-      else if ( idledelay && fnode->idledelay == 0 && st.st_mtime < (scantime - idlesec) )
-	{
-	  lprintf (2, "Marking file as idle, will not check for %d scans: %s",
-		   idledelay, fkey->filename);
-	  fnode->idledelay = (idledelay > 0) ? (idledelay-1) : 0;
-	}
-      
-      /* Process (read records from) the file if it's modification time has increased,
-	 it's size has increased and is not marked for permanent skipping */
-      if ( fnode->modtime < st.st_mtime &&
-	   fnode->offset < st.st_size &&
-	   fnode->offset != -1 )
-	{
-	  /* Increment files read counter */
-	  if ( iostats )
-	    scanfilesread++;
-	  
-	  fnode->offset = processfile (fkey->filename, fnode, st.st_size, st.st_mtime);
-	  
-	  /* If a proper file read but fatal error occured set the offset correctly
-	     and return a fatal error. */
-	  if ( fnode->offset < -1 )
-	    {
-	      fnode->offset = -fnode->offset;
-	      return -2;
-	    }
-	}
-      
-      /* Update scantime */
-      fnode->scantime = scantime;
-    }
-  
-  eclosedir (dir);
-  
-  if ( fchdir (rrootdir) )
-    {
-      if ( ! (stopsig && errno == EINTR) )
-	lprintf (0, "Cannot change to relative root directory: %s",
-		 strerror(errno));
-    }
-  
-  close (rrootdir);
-  
-  return 0;
-}  /* End of scanfiles() */
-
-
-/***************************************************************************
- * findfile:
- *
- * Search the filetree for a given FileKey.
- *
- * Return a pointer to a FileNode if found or 0 if no match found.
- ***************************************************************************/
-static FileNode*
-findfile (FileKey *fkey)
-{
-  FileNode *fnode = 0;
-  RBNode *tnode;
-  
-  /* Search for a matching inode + file name entry */
-  if ( (tnode = RBFind (filetree, fkey)) )
-    {
-      fnode = (FileNode *)tnode->data;
-    }
-  
-  return fnode;
-}  /* End of findfile() */
-
-
-/***************************************************************************
- * addfile:
- *
- * Add a file to the file tree, no checking is done to determine if
- * this entry already exists.
- *
- * Return a pointer to the added FileNode on success and 0 on error.
- ***************************************************************************/
-static FileNode*
-addfile (ino_t inode, char *filename, time_t modtime)
-{
-  FileKey *newfkey;
-  FileNode *newfnode;
-  size_t filelen;
-  
-  lprintf (1, "Adding %s", filename);
-  
-  /* Create new tree key */
-  filelen = strlen (filename);
-  newfkey = (FileKey *) malloc (sizeof(FileKey)+filelen);
-  
-  /* Create new tree node */
-  newfnode = (FileNode *) malloc (sizeof(FileNode));
-  
-  if ( ! newfkey || ! newfnode )
-    return 0;
-  
-  /* Populate the new key and node */
-  newfkey->inode = inode;
-  memcpy (newfkey->filename, filename, filelen+1);
-  
-  newfnode->offset = 0;
-  newfnode->modtime = modtime;
-  newfnode->idledelay = 0;
-  
-  RBTreeInsert (filetree, newfkey, newfnode);
-  
-  return newfnode;
-}  /* End of addfile() */
-
-
-/***************************************************************************
  * processfile:
  *
- * Process a file by reading any data after the last offset.
+ * Process a file by reading any data after the last offset to the end
+ * of the file.
  *
- * Return the new file offset on success and -1 on error reading file
- * and the negated file offset on successful read but fatal sending
- * error.
+ * Return 0 on success and -1 on send error and -2 on file read or other error.
  ***************************************************************************/
-static off_t
-processfile (char *filename, FileNode *fnode, off_t newsize, time_t newmodtime)
+static int
+processfile (FileLink *file)
 {
-  int fd;
-  int nread;
-  int reccnt = 0;
-  int reachedmax = 0;
-  int detlen;
-  int flags;
-  off_t newoffset = fnode->offset;
-  char mseedbuf[RECSIZE];
-  int mseedsize = RECSIZE;
-  char *tptr;
-  struct timespec treq, trem;
+  MSRecord *msr = 0;
+  char streamid[100];
+  off_t filepos;
+  int retcode = MS_ENDOFFILE;
+  int retval = 0;
   
-  lprintf (3, "Processing file %s", filename);
+  lprintf (3, "Processing file %s", file->name);
+
+  /* Reset byte and record counters */
+  file->bytecount = 0;
+  file->recordcount = 0;
   
-  /* Set the throttling sleep time */
-  treq.tv_sec = (time_t) 0;
-  treq.tv_nsec = (long) throttlensec;
-  
-  /* We are already in the local directory so do a cheap basename(1) */
-  if ( ! (tptr = strrchr (filename, '/')) )
-    tptr = filename;
-  else
-    tptr++;
-  
-  /* Set open flags */
-#if defined(__sun__) || defined(__sun)
-  flags = O_RDONLY | O_RSYNC;
-#else
-  flags = O_RDONLY;
-#endif
-  
-  /* Open target file */
-  if ( (fd = open (tptr, flags, 0)) == -1 )
+  /* Read all data records from file and send to the server */
+  while ( ! stopsig &&
+	  (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) != MS_NOERROR )
     {
-      if ( ! (stopsig && errno == EINTR) )
+      /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
+      msr_srcname (msr, streamid, 0);
+      strcat (streamid, "/MSEED");
+      
+      lprintf (4, "Sending %s", streamid);
+      
+      /* Send record to server */
+      if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, writeack) < 0 )
 	{
-	  lprintf (0, "Error opening %s: %s", filename, strerror(errno));
-	  return -1;
-	}
-      else
-	return newoffset;
-    }
-  
-  /* Read RECSIZE byte chunks off the end of the file */
-  while ( (newsize - newoffset) >= RECSIZE )
-    {
-      /* Jump out if we've read the maximum allowed number of records
-	 from this file for this scan */
-      if ( filemaxrecs && reccnt >= filemaxrecs )
-	{
-	  reachedmax = 1;
+	  retval = -1;
 	  break;
 	}
       
-      /* Read the next record */
-      if ( (nread = pread (fd, mseedbuf, RECSIZE, newoffset)) != RECSIZE )
-	{
-	  if ( ! (stopsig && errno == EINTR) )
-	    {
-	      lprintf (0, "Error: only read %d bytes from %s", nread, filename);
-	      close (fd);
-	      return -1;
-	    }
-	  else
-	    return newoffset;
-	}
+      /* Update counts */
+      file->bytecount += msr->reclen;
+      file->recordcount++;
       
-      newoffset += nread;
+      totalbytes += msr->reclen;
+      totalrecords++;
       
-      /* Increment records read counter */
-      scanrecordsread++;
-      
-      /* Check record for 1000 blockette and verify SEED structure */
-      if ( (detlen = find_reclen (mseedbuf, RECSIZE)) <= 0 )
+      /* Add record to trace coverage */
+      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
 	{
-	  /* If no data has ever been read from this file, ignore file */
-	  if ( fnode->offset == 0 )
-	    {
-	      lprintf (0, "%s: Not a valid Mini-SEED record at offset %lld, ignoring file",
-		       filename, (long long) (newoffset - nread));
-	      close (fd);
-	      return -1;
-	    }
-	  /* Otherwise, if records have been read, skip until next scan */
-	  else
-	    {
-	      lprintf (0, "%s: Not a valid Mini-SEED record at offset %lld (new bytes %lld), skipping for this scan",
-		       filename, (long long) (newoffset - nread),
-		       (long long ) (newsize - newoffset + nread));
-	      close (fd);
-	      return (newoffset - nread);
-	    }
+	  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
 	}
-      else if ( detlen != RECSIZE )
-	{
-	  lprintf (0, "%s: Unexpected record length: %d at offset %lld, ignoring file",
-		   filename, detlen, (long long) (newoffset - nread));
-	  close (fd);
-	  return -1;
-	}
-      /* Prepare for sending the record off to the DataLink ringserver */
-      else
-	{
-	  lprintf (4, "Sending %20.20s", mseedbuf);
-	  
-	  /* Send data record to the ringserver */
-	  if ( sendrecord (mseedbuf, mseedsize) )
-	    {
-	      return -newoffset;
-	    }
-	  
-	  /* Increment records written counter */
-	  if ( iostats )
-	    scanrecordswritten++;
-	  
-	  /* Sleep for specified throttle interval */
-	  if ( throttlensec )
-	    nanosleep (&treq, &trem);
-	}
-      
-      reccnt++;
     }
   
-  close (fd);
+  totalfiles++;
   
-  /* Update modtime:
-   * If the maximum number of records have been reached we are not necessarily 
-   * at the end of the file so set the modtime one second in the past so we are
-   * triggered to look at this file again. */
-  if ( reachedmax )
-    fnode->modtime = newmodtime - 1;
-  else
-    fnode->modtime = newmodtime;
+  /* Print error if not EOF */
+  if ( retcode != MS_ENDOFFILE && ! retval )
+    {
+      lprintf (0, "retcode: %d, retval: %d, stopsig: %d", retcode, retval, stopsig);
+
+      lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
+      retval = -2;
+    }
   
-  if ( reccnt )
-    lprintf (2, "Read %d %d-byte record(s) from %s",
-	     reccnt, RECSIZE, filename);
+  /* Make sure everything is cleaned up */
+  ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
   
-  return newoffset;
+  if ( file->recordcount )
+    lprintf (2, "Sent %d bytes of %d record(s) from %s",
+	     file->bytecount, file->recordcount, file->name);
+  
+  return retval;
 }  /* End of processfile() */
 
 
@@ -753,27 +312,19 @@ processfile (char *filename, FileNode *fnode, off_t newsize, time_t newmodtime)
 static void
 printfilelist (FILE *fp)
 {
-  FileKey  *fkey;
-  FileNode *fnode;
-  RBNode   *tnode;
-  Stack    *stack;
+  FileLink *file = filelist;
   
-  stack = StackCreate();
-  RBBuildStack (filetree, stack);
-  
-  while ( (tnode = (RBNode *) StackPop (stack)) )
+  while ( file )
     {
-      fkey = (FileKey *) tnode->key;
-      fnode = (FileNode *) tnode->data;
+      fprintf (fp, "%s\t%lld\t%lld\n",
+	       file->name,
+	       (signed long long int) file->offset,
+	       (signed long long int) file->size);
       
-      fprintf (fp, "%s\t%llu\t%lld\t%lld\n",
-	       fkey->filename,
-	       (unsigned long long int) fkey->inode,
-	       (signed long long int) fnode->offset,
-	       (signed long long int) fnode->modtime);
+      file = file->next;
     }
   
-  StackDestroy (stack, free);
+  return;
 }  /* End of printfilelist() */
 
 
@@ -782,9 +333,9 @@ printfilelist (FILE *fp)
  *
  * Save state information to a specified file.  First the new state
  * file is written to a temporary file (the same statefile name with a
- * ".tmp" extension) then rename the temporary file.  This avoids
- * partial writes of the state file if the program is killed while
- * writing the state file.
+ * ".tmp" extension) then the temporary file is renamed to overwrite
+ * the state file.  This avoids partial writes of the state file if
+ * the program is killed while writing the state file.
  *
  * Returns 0 on success and -1 on error.
  ***************************************************************************/
@@ -843,14 +394,13 @@ savestate (char *statefile)
 static int
 recoverstate (char *statefile)
 {
-  FileNode *fnode;
-  char line[600];
+  FileLink *file;
+  char line[MAX_FILENAME_LENGTH+30];
   int fields, count;
   FILE *fp;
   
   char filename[MAX_FILENAME_LENGTH];
-  unsigned long long int inode;
-  signed long long int offset, modtime;
+  signed long long int offset, size;
   
   if ( (fp=fopen(statefile, "r")) == NULL )
     {
@@ -864,24 +414,42 @@ recoverstate (char *statefile)
   
   while ( (fgets (line, sizeof(line), fp)) !=  NULL)
     {
-      fields = sscanf (line, "%s %llu %lld %lld\n",
-		       filename, &inode, &offset, &modtime);
+      fields = sscanf (line, "%s %lld %lld\n",
+		       filename, &offset, &size);
       
       if ( fields < 0 )
         continue;
       
-      if ( fields < 4 )
+      if ( fields < 3 )
         {
           lprintf (0, "Could not parse line %d of state file", count);
 	  continue;
         }
       
-      fnode = addfile ((ino_t) inode, filename, (time_t) modtime);
-      
-      if ( fnode )
+      /* Find matching enty in input file list */
+      file = filelist;
+      while ( file )
 	{
-	  fnode->offset = (off_t) offset;
-	  fnode->scantime = 0;
+	  /* Shortcut if this entry has already been updated */
+	  if ( file->offset > 0 )
+	    {
+	      file = file->next;
+	      continue;
+	    }
+	  
+	  /* Compare file names and update offset if match found */
+	  if ( ! strcmp (filename, file->name) )
+	    {
+	      file->offset = offset;
+	      
+	      if ( file->size != size )
+		lprintf (2, "%s: size has changed since last execution (%lld => %lld)",
+			 (signed long long int) size, (signed long long int) file->size);
+	      
+	      break;
+	    }
+	  
+	  file = file->next;
 	}
       
       count++;
@@ -891,47 +459,6 @@ recoverstate (char *statefile)
   
   return 0;
 }  /* End of recoverstate() */
-
-
-/***************************************************************************
- * sendrecord:
- *
- * Send the specified record to the DataLink server.
- *
- * Returns 0 on success, and -1 on failure
- ***************************************************************************/
-static int
-sendrecord (char *record, int reclen)
-{
-  struct fsdh_s *fsdh;
-  struct btime_s stime;
-  hptime_t starttime;
-  char streamid[100];
-  
-  /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
-  ms_recsrcname (record, streamid, 0);
-  strcat (streamid, "/MSEED");
-  
-  fsdh = (struct fsdh_s *) record;
-  memcpy (&stime, &fsdh->start_time, sizeof(struct btime_s));
-  
-  /* Swap start time values if improbable year value */
-  if ( stime.year < 1960 || stime.year > 3000 )
-    {
-      MS_SWAPBTIME(&stime);
-    }
-  
-  /* Determine high precision start time */
-  starttime = ms_btime2hptime (&stime);
-  
-  /* Send record to server */
-  if ( dl_write (dlconn, record, reclen, streamid, starttime, writeack) < 0 )
-    {
-      return -1;
-    }
-  
-  return 0;
-}  /* End of sendrecord() */
 
 
 /***************************************************************************
@@ -945,11 +472,7 @@ static int
 processparam (int argcount, char **argvec)
 {
   char *address = 0;
-  char *dirfilename = 0;
-  char *matchstr = 0;
-  char *rejectstr = 0;
   char *tptr;
-  int keepalive = -1;
   int optind;
   
   /* Process all command line arguments */
@@ -968,107 +491,29 @@ processparam (int argcount, char **argvec)
         {
           verbose += strspn (&argvec[optind][1], "v");
         }
-      else if (strcmp (argvec[optind], "-1") == 0)
-        {
-	  onescan = 1;
-        }
       else if (strcmp (argvec[optind], "-I") == 0)
         {
 	  iostats = 1;
         }
-      else if (strcmp (argvec[optind], "-BL") == 0)
+      else if (strcmp (argvec[optind], "-q") == 0)
         {
-          budlatency = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
+          quiet = 1;
         }
-      else if (strcmp (argvec[optind], "-n") == 0)
+      else if (strcmp (argvec[optind], "-E") == 0)
         {
-          nextnew = 1;
-        }
-      else if (strcmp (argvec[optind], "-z") == 0)
-        {
-          nextnew = 2;
-        }
-      else if (strcmp (argvec[optind], "-s") == 0)
-        {
-          scansleep = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-sz") == 0)
-        {
-          scansleep0 = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-i") == 0)
-        {
-          idledelay = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-I") == 0)
-        {
-          idlesec = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-Q") == 0)
-        {
-          quietsec = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-T") == 0)
-        {
-          throttlensec = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-f") == 0)
-        {
-          filemaxrecs = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
+	  quitonerror = 1;
         }
       else if (strcmp (argvec[optind], "-r") == 0)
         {
           maxrecur = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
         }
-      else if (strcmp (argvec[optind], "-M") == 0)
+      else if (strcmp (argvec[optind], "-NA") == 0)
         {
-          matchstr = getoptval(argcount, argvec, optind++);
-        }
-      else if (strcmp (argvec[optind], "-R") == 0)
-        {
-          rejectstr = getoptval(argcount, argvec, optind++);
-        }
-      else if (strcmp (argvec[optind], "-k") == 0)
-        {
-          keepalive = strtoul(getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-A") == 0)
-        {
-          writeack = 1;
+          writeack = 0;
         }
       else if (strcmp (argvec[optind], "-S") == 0)
         {
           statefile = getoptval(argcount, argvec, optind++);
-	  
-	  /* Create an absolute path to statefile if not already specified as such */
-	  if ( statefile && *statefile != '/' )
-	    {
-	      char absstatefile[1024];
-	      
-	      if ( ! getcwd(absstatefile, sizeof(absstatefile)) )
-		{
-		  lprintf (0, "Error determining the current working directory: %s", strerror(errno));
-		  exit (1);
-		}
-	      
-	      strncat (absstatefile, "/", sizeof(absstatefile) - strlen(absstatefile) - 1);
-	      strncat (absstatefile, statefile, sizeof(absstatefile) - strlen(absstatefile) - 1);
-	      statefile = strdup(absstatefile);
-	    }
-        }
-      else if (strcmp (argvec[optind], "-d") == 0)
-        {
-          adddir (getoptval(argcount, argvec, optind++));
-        }
-      else if (strcmp (argvec[optind], "-D") == 0)
-        {
-	  if ( dirfilename )
-	    {
-	      lprintf (0, "Only one -D option is allowed");
-	      exit (1);
-	    }
-	  
-	  dirfilename = getoptval(argcount, argvec, optind++);
         }
       else if (strncmp (argvec[optind], "-", 1) == 0)
         {
@@ -1077,19 +522,40 @@ processparam (int argcount, char **argvec)
         }
       else
 	{
+	  tptr = argvec[optind];
+	  
+	  /* Assume this is the server if not already specified */
 	  if ( ! address )
-	    address = argvec[optind];
+	    {
+	      address = tptr;
+	    }
+	  /* Otherwise check for an input file list */
+	  else if ( tptr[0] == '@' )
+	    {
+	      if ( processlistfile ( tptr+1 ) < 0 )
+		{
+		  lprintf (0, "Error processing list file %s", tptr+1);
+		  exit (1);
+		}
+	    }
+	  /* Otherwise this is an input file */
 	  else
-	    lprintf (0, "Unknown option: %s", argvec[optind]);
+	    {
+	      if ( addfile ( tptr ) < 0 )
+		{
+		  lprintf (0, "Error adding input file %s", tptr+1);
+		  exit (1);
+		}
+	    }
 	}
     }
   
   /* Make sure a server was specified */
   if ( ! address )
     {
-      fprintf(stderr, "No DataLink server specified\n\n");
+      fprintf(stderr, "No data submission server specified\n\n");
       fprintf(stderr, "%s version: %s\n\n", PACKAGE, VERSION);
-      fprintf(stderr, "Usage: %s [options] [host][:port]\n", PACKAGE);
+      fprintf(stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
       fprintf(stderr, "Try '-h' for detailed help\n");
       exit (1);
     }
@@ -1097,103 +563,27 @@ processparam (int argcount, char **argvec)
   /* Allocate and initialize a new connection description */
   dlconn = dl_newdlcp (address, argvec[0]);
   
-  /* Set keepalive parameter, allow for valid value of 0 */
-  if ( keepalive >= 0 )
-    dlconn->keepalive = keepalive;
-  
-  /* Initialize the verbosity for the dl_log function */
+  /* Initialize the verbosity for the ms_log and dl_log functions */
+  ms_loginit (&lprintf0, "", &lprintf0, "");
   dl_loginit (verbose, &lprintf0, "", &lprintf0, "");
   
   /* Report the program version */
   lprintf (0, "%s version: %s", PACKAGE, VERSION);
   
-  /* Load dirlist from dirfile */
-  if ( dirfilename )
+  /* Make sure input files/dirs specified */
+  if ( filelist == 0 )
     {
-      /* Make sure no directories were already added to the list */
-      if ( dirlist )
-	{
-	  lprintf (0, "Cannot specify both -d and -D options");
-	  exit (1);
-	}
-      
-      /* Allocate new DirFile */
-      dirfile = (DirFile *) malloc (sizeof(DirFile));
-      
-      if ( dirfile == NULL )
-	{
-	  lprintf (0, "Error allocating memory for dir file list");
-	  exit (1);
-	}
-      
-      /* Copy directory list file name */
-      strncpy (dirfile->filename, dirfilename, sizeof(dirfile->filename));
-      
-      /* Set dirfile modification time to 0 */
-      dirfile->modtime = 0;
-      
-      processdirfile (dirfile->filename);
-    }
-  
-  /* Make sure base dir(s) specified */
-  if ( dirlist == 0 )
-    {
-      lprintf (0, "No base directories were specified");
+      lprintf (0, "No input files or directories were specified");
       exit (1);
-    }
-  
-  /* Compile the match regex if specified */
-  if ( matchstr )
-    {
-      fnmatch = (regex_t *) malloc (sizeof (regex_t));
-      
-      if ( regcomp(fnmatch, matchstr, REG_EXTENDED|REG_NOSUB ) != 0 )
-	{
-	  lprintf (0, "Cannot compile regular expression '%s'", matchstr);
-	  exit (1);
-	}
-    }
-  
-  /* Compile the reject regex if specified */
-  if ( rejectstr )
-    {
-      fnreject = (regex_t *) malloc (sizeof (regex_t));
-      
-      if ( regcomp(fnreject, rejectstr, REG_EXTENDED|REG_NOSUB ) != 0 )
-	{
-	  lprintf (0, "Cannot compile regular expression '%s'", rejectstr);
-	  exit (1);
-	}
     }
   
   /* Attempt to recover sequence numbers from state file */
   if ( statefile )
     {
-      /* Check if interval was specified for state saving */
-      if ( (tptr = strchr (statefile, ':')) != NULL )
-        {
-          char *tail;
-          
-          *tptr++ = '\0';
-	  
-          stateint = (int) strtol (tptr, &tail, 10);
-	  
-          if ( *tail || (stateint < 0 || stateint > 1e9) )
-            {
-              lprintf (0, "State saving interval specified incorrectly");
-              exit (1);
-            }
-        }
-      
       if ( recoverstate (statefile) < 0 )
         {
           lprintf (0, "state recovery failed");
         }
-      /* If nextnew (-z) was specified but state file read, turn it off */
-      else if ( nextnew == 2 )
-	{
-	  nextnew = 0;
-	}
     }
   
   return 0;
@@ -1230,178 +620,269 @@ getoptval (int argcount, char **argvec, int argopt)
 
 
 /***************************************************************************
- * adddir:
+ * addfile:
  *
- * Add directory to end of the global directory list (dirlist).
+ * Add file to end of the global file list (filelist).
+ *
+ * Return 0 on success and -1 on error.
  ***************************************************************************/
-static void
-adddir (char *dirname)
+static int
+addfile (char *filename)
 {
-  struct dirlink *lastlp, *newlp;
+  FileLink *newfile;
   struct stat st;
-  int dirlen;
+  int filelen;
   
-  if ( ! dirname )
+  if ( ! filename )
     {
-      lprintf (0, "adddir(): No directory name specified");
-      return;
+      lprintf (0, "addfile(): No file or directory name specified");
+      return -1;
     }
   
-  dirlen = strlen (dirname);
+  filelen = strlen (filename);
   
   /* Remove trailing slash if included */
-  if ( dirname[dirlen-1] == '/' )
-    dirname[dirlen-1] = '\0';
+  if ( filename[filelen-1] == '/' )
+    filename[filelen-1] = '\0';
   
-  /* Verify that a directory exists, if not log a warning */
-  if ( stat (dirname, &st) )
+  /* Stat file */
+  if ( stat (filename, &st) )
     {
-      lprintf (0, "WARNING: Could not find '%s'", dirname);
-    }
-  else if ( ! S_ISDIR(st.st_mode) )
-    {
-      lprintf (0, "WARNING '%s' is not a directory, skipping", dirname);
-      return;
+      lprintf (0, "ERROR: Could not find '%s': %s", filename, strerror(errno));
+      return -1;
     }
   
-  /* Create the new DirLink */
-  newlp = (DirLink *) malloc (sizeof(DirLink)+dirlen+1);
-  
-  if ( !newlp )
-    return;
-  
-  memcpy (newlp->dirname, dirname, dirlen+1);
-  newlp->accesserr = 0;
-  newlp->next = 0;
-  
-  /* Find the last DirLink in the directory list */
-  lastlp = dirlist;
-  while ( lastlp != 0 )
+  /* If the file is actually a directory add files it contains recursively */
+  if ( S_ISDIR(st.st_mode) )
     {
-      if ( lastlp->next == 0 )
-        break;
+      if ( adddir (filename, filename, maxrecur) )
+	{
+	  return -1;
+	}
+    }
+  /* If the file is a regular file add it to the input list */
+  else if ( S_ISREG(st.st_mode) )
+    {
+      /* Create the new FileLink */
+      if ( ! (newfile = (FileLink *) malloc (sizeof(FileLink)+filelen+1)) )
+	{
+	  lprintf (0, "Error allocating memory");
+	  return -1;
+	}
       
-      lastlp = lastlp->next;
+      memcpy (newfile->name, filename, filelen+1);
+      newfile->offset = 0;
+      newfile->size = st.st_size;
+      newfile->bytecount = 0;
+      newfile->recordcount = 0;
+      newfile->next = 0;
+      
+      inputbytes += st.st_size;
+      
+      /* Insert the new FileLink at the end of the input list */
+      if ( lastfile == 0 )
+	filelist = newfile;
+      else
+	lastfile->next = newfile;
+      
+      lastfile = newfile;
+    }
+  else
+    {
+      lprintf (0, "ERROR: '%s' is not a regular file or directory", filename);
+      return -1;
     }
   
-  /* Insert the new DirLink at the end of the directory list */
-  if ( lastlp == 0 )
-    dirlist = newlp;
-  else
-    lastlp->next = newlp;
+  return 0;
+}  /* End of addfile() */
+
+
+/***************************************************************************
+ * adddir:
+ *
+ * Scan a directory and recursively drop into sub-directories up to the 
+ * maximum recursion level adding all files found to the input file list.
+ *
+ * When initially called the targetdir and basedir should be the same,
+ * either an absolute or relative path.  During directory recursion
+ * these values are maintained such that they are either absolute
+ * paths or targetdir is a relatively path from the current working
+ * directory (which changes during recursion) and basedir is a
+ * relative path from the initial directory.
+ *
+ * Return 0 on success and -1 on error.
+ ***************************************************************************/
+static int
+adddir (char *targetdir, char *basedir, int level)
+{
+  static int dlevel = 0;
+  struct stat st;
+  struct dirent *de;
+  int rrootdir;
+  EDIR *dir;
   
+  lprintf (3, "Processing directory '%s'", basedir);
+  
+  if ( (rrootdir = open (".", O_RDONLY, 0)) == -1 )
+    {
+      if ( ! (stopsig && errno == EINTR) )
+	lprintf (0, "Error opening current working directory");
+      return -1;
+    }
+  
+  if ( chdir (targetdir) )
+    {
+      if ( ! (stopsig && errno == EINTR) )
+	lprintf (0, "Cannot change to directory %s: %s", targetdir, strerror(errno));
+      close (rrootdir);
+      return -1;
+    }
+  
+  if ( (dir = eopendir (".")) == NULL )
+    {
+      lprintf (0, "Cannot open directory %s: %s", targetdir, strerror(errno));
+      
+      if ( fchdir (rrootdir) )
+	{
+	  lprintf (0, "Cannot change to relative root directory: %s", strerror(errno));
+	}
+      
+      close (rrootdir);
+      return -1;
+    }
+  
+  while ( (de = ereaddir(dir)) != NULL )
+    {
+      char filename[MAX_FILENAME_LENGTH];
+      int filenamelen;
+
+      /* Skip "." and ".." entries */
+      if ( !strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") )
+	continue;
+      
+      filenamelen = snprintf (filename, sizeof(filename),
+			      "%s/%s", basedir, de->d_name);
+      
+      /* Make sure the filename was not truncated */
+      if ( filenamelen >= sizeof(filename) )
+	{
+	  lprintf (0, "File name beyond maximum of %d characters:", sizeof(filename));
+	  lprintf (0, "  %s", filename);
+	  return -1;
+	}
+      
+      /* Stat the file */
+      if ( stat (de->d_name, &st) < 0 )
+	{
+	  /* Interruption signals when the stop signal is set should break out */
+	  if ( stopsig && errno == EINTR )
+	    break;
+	  
+	  lprintf (0, "Cannot stat %s: %s", filename, strerror(errno));
+	  return -1;
+	}
+      
+      /* If directory recurse up to the limit */
+      if ( S_ISDIR(st.st_mode) )
+	{
+	  if ( dlevel < level )
+	    {
+	      lprintf (4, "Recursing into %s", filename);
+	      
+	      dlevel++;
+	      if ( adddir (de->d_name, filename, level) == -2 )
+		return -1;
+	      dlevel--;
+	    }
+	  continue;
+	}
+      
+      /* Sanity check for a regular file */
+      if ( !S_ISREG(st.st_mode) )
+	{
+	  lprintf (0, "Error %s is not a regular file, skipping", filename);
+	  continue;
+	}
+      
+      /* Add file to input list */
+      if ( addfile ( filename ) < 0 )
+	{
+	  lprintf (0, "Error adding input file %s", filename);
+	  return -1;
+	}
+    }
+  
+  eclosedir (dir);
+  
+  if ( fchdir (rrootdir) )
+    {
+      if ( ! (stopsig && errno == EINTR) )
+	lprintf (0, "Error: cannot change to relative root directory: %s",
+		 strerror(errno));
+    }
+  
+  close (rrootdir);
+  
+  return 0;
 }  /* End of adddir() */
 
 
 /***************************************************************************
- * processdirfile:
+ * processlistfile:
  *
- * Clear out global directory list (dirlist) and add all directories
- * listed in the specified file.
+ * Add files listed in the specified file to the global input file list.
+ *
+ * Returns count of files added on success and -1 on error.
  ***************************************************************************/
-static void
-processdirfile (char *filename) 
+static int
+processlistfile (char *filename) 
 {
-  DirLink *dlp;
-  struct stat st;
   FILE *fp;
-  char dirlistent[MAX_FILENAME_LENGTH];
-
-  lprintf (3, "Checking directory list file '%s'", filename);
-
-  if ( stat (filename, &st) )
-    {
-      lprintf (0, "Cannot stat dir list file %s: %s", filename, strerror(errno));
-      return;
-    }
-
-  if ( !S_ISREG(st.st_mode) )
-    {
-      lprintf (0, "%s is not a regular file", filename);
-      return;
-    }
+  char filelistent[MAX_FILENAME_LENGTH];
+  int filecount = 0;
+  int rv;
   
-  /* Check that the file has been modified since the last check */
-  if ( st.st_mtime <= dirfile->modtime )
-    {
-      return;  /* No modification = no (re)loading of dir list */
-    }
-  
-  /* Store new modification time */
-  dirfile->modtime = st.st_mtime;
-  
-  /* Clear out directory list (dirlist) */
-  if ( dirlist )
-    {
-      dlp = dirlist->next;      
-      free (dirlist);
-      dirlist = dlp;
-    }
-  dirlist = 0;
+  lprintf (3, "Reading list file '%s'", filename);
   
   if ( ! (fp = fopen(filename, "r")) )
     {
-      lprintf (0, "Cannot open dir list file %s: %s", filename, strerror(errno));
-      return;
+      lprintf (0, "Error: Cannot open list file %s: %s", filename, strerror(errno));
+      return -1;
     }
   
-  lprintf (2, "Reading list of directories from %s", filename);
-  
-  while ( fgets (dirlistent, sizeof(dirlistent), fp) )
+  while ( fgets (filelistent, sizeof(filelistent), fp) )
     {
       char *cp;
       
       /* End string at first newline character */
-      if ( (cp = strchr(dirlistent, '\n')) )
+      if ( (cp = strchr(filelistent, '\n')) )
 	*cp = '\0';
       
       /* Skip empty lines */
-      if ( ! strlen (dirlistent) )
+      if ( ! strlen (filelistent) )
 	continue;
       
       /* Skip comment lines */
-      if ( *dirlistent == '#' )
+      if ( *filelistent == '#' )
 	continue;
       
-      lprintf (2, "Adding directory '%s' from list file", dirlistent);
+      lprintf (2, "Adding '%s' from list file", filelistent);
       
-      adddir (dirlistent);
+      rv = addfile (filelistent);
+      
+      if ( rv < 0 )
+	{
+	  filecount = rv;
+	  break;
+	}
+      
+      filecount += rv;
     }
   
   fclose (fp);
   
-}  /* End of processdirfile() */
-
-
-/***************************************************************************
- * keycompare:
- *
- * Compare two FileKeys passed as void pointers.
- *
- * Return 1 if a > b, -1 if a < b and 0 otherwise (e.g. equality).
- ***************************************************************************/
-static int
-keycompare (const void *a, const void *b)
-{
-  int cmpval;
-  
-  /* Compare Inode values */
-  if ( ((FileKey*)a)->inode > ((FileKey*)b)->inode )
-    return 1;
-  
-  else if ( ((FileKey*)a)->inode < ((FileKey*)b)->inode )
-    return -1;
-  
-  /* Compare filename values */
-  cmpval = strcmp ( ((FileKey*)a)->filename, ((FileKey*)b)->filename );
-  
-  if ( cmpval > 0 )
-    return 1;
-  else if ( cmpval < 0 )
-    return -1;
-  
-  return 0;
-}  /* End of keycompare() */
+  return filecount;
+}  /* End of processlistfile() */
 
 
 /***************************************************************************
@@ -1502,21 +983,16 @@ usage()
 	  " -h             Show this usage message\n"
 	  " -v             Be more verbose, multiple flags can be used\n"
 
-          " -L scans       Print IO stats after this many full scans\n"
-
-	  " -r level       Maximum directory levels to recurse (%d levels)\n"
-	  " -M match       Only process filenames that match this regular expression\n"
-	  " -R reject      Only process filenames that do not match this regular expression\n"
-
+	  " -r level       Maximum directory levels to recurse, default is no limit\n"
+	  
+	  " -E             Quit on connection errors, by default the client will reconnect\n"
+	  
           " -I             Print IO stats during transmission\n"
 	  
 	  " -q             Be quiet, do not print diagnostics or transmission summary NOTDONE\n"
 	  " -NA            Do not require the server to acknowledge each packet received NOTDONE\n"
-
-	  " -A             Require the server to acknowledge each packet received\n"
-	  " -S file[:int]  State file to save/restore file time stamps, optionally\n"
-	  "                  an interval, in seconds, can be specified to save the\n"
-	  "                  state file (default interval: %d seconds)\n\n",
-	  idledelay, idlesec, throttlensec, filemaxrecs, maxrecur, stateint);
+	  
+	  " -S file        State file to save/restore file time stamps\n"
+	  );
   exit (1);
 }  /* End of usage() */
