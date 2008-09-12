@@ -8,7 +8,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center
  *
- * modified 2008.193
+ * modified 2008.256
  ***************************************************************************/
 
 #include <stdio.h>
@@ -123,7 +123,7 @@ main (int argc, char **argv)
       /* Collect packets in streaming mode */
       while ( dl_collect (dlconn, &dlpack, packetdata, sizeof(packetdata), endflag) == DLPACKET )
 	{
-	  dl_dltime2seedtimestr (dlpack.datatime, timestr, 1);
+	  dl_dltime2seedtimestr (dlpack.datastart, timestr, 1);
 	  
 	  dl_log (0, 0, "Received %s (%lld), %s, %d\n",
 		  dlpack.streamid, dlpack.pktid, timestr, dlpack.datasize);

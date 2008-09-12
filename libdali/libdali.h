@@ -17,7 +17,7 @@
  *
  * @author Chad Trabant, IRIS Data Management Center
  *
- * modified: 2008.196
+ * modified: 2008.256
  ***************************************************************************/
 
 #ifndef LIBDALI_H
@@ -29,8 +29,8 @@ extern "C" {
 
 #include "portable.h"
 
-#define LIBDALI_VERSION "1.0"        /**< libdali version */
-#define LIBDALI_RELEASE "2008.196"   /**< libdali release date */
+#define LIBDALI_VERSION "1.1"        /**< libdali version */
+#define LIBDALI_RELEASE "2008.256"   /**< libdali release date */
 
 #define MAXPACKETSIZE       16384    /**< Maximum packet size for libdali */
 #define MAXREGEXSIZE        16384    /**< Maximum regex pattern size */
@@ -102,7 +102,8 @@ typedef struct DLPacket_s
   char        streamid[MAXSTREAMID]; /**< Stream ID */
   int64_t     pktid;            /**< Packet ID */
   dltime_t    pkttime;          /**< Packet time */
-  dltime_t    datatime;         /**< Data time */
+  dltime_t    datastart;        /**< Data start time */
+  dltime_t    dataend;          /**< Data end time */
   int32_t     datasize;         /**< Data size in bytes */
 } DLPacket;
 
@@ -115,8 +116,8 @@ extern int64_t dl_position (DLCP *dlconn, int64_t pktid, dltime_t pkttime);
 extern int64_t dl_position_after (DLCP *dlconn, dltime_t datatime);
 extern int64_t dl_match (DLCP *dlconn, char *matchpattern);
 extern int64_t dl_reject (DLCP *dlconn, char *rejectpattern);
-extern int64_t dl_write (DLCP *dlconn, void *packet, int packetlen,
-			 char *streamid, dltime_t datatime, int ack);
+extern int64_t dl_write (DLCP *dlconn, void *packet, int packetlen, char *streamid,
+			 dltime_t datastart, dltime_t dataend, int ack);
 extern int     dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet,
 			void *packetdata, size_t maxdatasize);
 extern int     dl_getinfo (DLCP *dlconn, const char *infotype, char *infomatch,

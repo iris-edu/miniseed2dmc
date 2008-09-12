@@ -54,9 +54,9 @@ Include dependency graph for connection.c:</div>
 <tr><td class="memItemLeft" nowrap align="right" valign="top">int64_t&nbsp;</td><td class="memItemRight" valign="bottom"><a class="el" href="../../d5/d5f/connection_8c.html#ffcdbcae2611a8c6208243bc2a418149">dl_reject</a> (<a class="el" href="../../d9/d9a/struct_d_l_c_p.html">DLCP</a> *dlconn, char *rejectpattern)</td></tr>
 
 <tr><td class="mdescLeft">&nbsp;</td><td class="mdescRight">Set the packet reject parameters for a connection.  <a href="#ffcdbcae2611a8c6208243bc2a418149"></a><br></td></tr>
-<tr><td class="memItemLeft" nowrap align="right" valign="top">int64_t&nbsp;</td><td class="memItemRight" valign="bottom"><a class="el" href="../../d5/d5f/connection_8c.html#9a230b88779edf1efcd67f85ae887e58">dl_write</a> (<a class="el" href="../../d9/d9a/struct_d_l_c_p.html">DLCP</a> *dlconn, void *packet, int packetlen, char *streamid, <a class="el" href="../../d3/d41/libdali_8h.html#d46ecd16ed2b512a60d5f948fa15a31f">dltime_t</a> datatime, int ack)</td></tr>
+<tr><td class="memItemLeft" nowrap align="right" valign="top">int64_t&nbsp;</td><td class="memItemRight" valign="bottom"><a class="el" href="../../d5/d5f/connection_8c.html#6a21194a1a308eb91db0d32bced621f8">dl_write</a> (<a class="el" href="../../d9/d9a/struct_d_l_c_p.html">DLCP</a> *dlconn, void *packet, int packetlen, char *streamid, <a class="el" href="../../d3/d41/libdali_8h.html#d46ecd16ed2b512a60d5f948fa15a31f">dltime_t</a> datastart, <a class="el" href="../../d3/d41/libdali_8h.html#d46ecd16ed2b512a60d5f948fa15a31f">dltime_t</a> dataend, int ack)</td></tr>
 
-<tr><td class="mdescLeft">&nbsp;</td><td class="mdescRight">Send a packet to the DataLink server.  <a href="#9a230b88779edf1efcd67f85ae887e58"></a><br></td></tr>
+<tr><td class="mdescLeft">&nbsp;</td><td class="mdescRight">Send a packet to the DataLink server.  <a href="#6a21194a1a308eb91db0d32bced621f8"></a><br></td></tr>
 <tr><td class="memItemLeft" nowrap align="right" valign="top">int&nbsp;</td><td class="memItemRight" valign="bottom"><a class="el" href="../../d5/d5f/connection_8c.html#9a49f3842de1a14030b20e665bfcbf31">dl_read</a> (<a class="el" href="../../d9/d9a/struct_d_l_c_p.html">DLCP</a> *dlconn, int64_t pktid, <a class="el" href="../../d1/da3/struct_d_l_packet.html">DLPacket</a> *packet, void *packetdata, size_t maxdatasize)</td></tr>
 
 <tr><td class="mdescLeft">&nbsp;</td><td class="mdescRight">Request a packet from the DataLink server.  <a href="#9a49f3842de1a14030b20e665bfcbf31"></a><br></td></tr>
@@ -79,7 +79,7 @@ Include dependency graph for connection.c:</div>
 <hr><a name="_details"></a><h2>Detailed Description</h2>
 Routines for managing a connection with a DataLink server.<p>
 <dl class="author" compact><dt><b>Author:</b></dt><dd>Chad Trabant, IRIS Data Management Center</dd></dl>
-modified: 2008.193 <hr><h2>Function Documentation</h2>
+modified: 2008.256 <hr><h2>Function Documentation</h2>
 <a class="anchor" name="ccca46f231c23fd495bb6d5725e97957"></a><!-- doxytag: member="connection.c::dl_collect" ref="ccca46f231c23fd495bb6d5725e97957" args="(DLCP *dlconn, DLPacket *packet, void *packetdata, size_t maxdatasize, int8_t endflag)" -->
 <div class="memitem">
 <div class="memproto">
@@ -534,7 +534,7 @@ Set the client read position to a specified packet ID and packet time. A packet 
 <p>
 Position the client read position based on data time. 
 <p>
-Set the client read position to the first packet with a data time after a reference <em>datatime</em>. The reference time must be specified as a dltime_t value, see <a class="el" href="../../d3/d41/libdali_8h.html#2deac0dfe42843e14d9e79e537061b90" title="Convert specified time values to a dltime_t value.">dl_time2dltime()</a> and friends to generate these time values.<p>
+Set the client read position to the first packet with a data end time after a reference <em>datatime</em>. The reference time must be specified as a dltime_t value, see <a class="el" href="../../d3/d41/libdali_8h.html#2deac0dfe42843e14d9e79e537061b90" title="Convert specified time values to a dltime_t value.">dl_time2dltime()</a> and friends to generate these time values.<p>
 <dl compact><dt><b>Parameters:</b></dt><dd>
   <table border="0" cellspacing="2" cellpadding="0">
     <tr><td valign="top"></td><td valign="top"><em>dlconn</em>&nbsp;</td><td>DataLink Connection Parameters </td></tr>
@@ -669,7 +669,7 @@ Set the terminate parameter of a DataLink connection.
 Set the terminate parameter/flag in the <em><a class="el" href="../../d9/d9a/struct_d_l_c_p.html">DLCP</a></em> and log a diagnostic message indicating that the connection is terminating. Some of the library routines watch the terminate parameter as an indication that the client program is requesting a shut down. This routine is typically used in a signal handler. 
 </div>
 </div><p>
-<a class="anchor" name="9a230b88779edf1efcd67f85ae887e58"></a><!-- doxytag: member="connection.c::dl_write" ref="9a230b88779edf1efcd67f85ae887e58" args="(DLCP *dlconn, void *packet, int packetlen, char *streamid, dltime_t datatime, int ack)" -->
+<a class="anchor" name="6a21194a1a308eb91db0d32bced621f8"></a><!-- doxytag: member="connection.c::dl_write" ref="6a21194a1a308eb91db0d32bced621f8" args="(DLCP *dlconn, void *packet, int packetlen, char *streamid, dltime_t datastart, dltime_t dataend, int ack)" -->
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
@@ -701,7 +701,13 @@ Set the terminate parameter/flag in the <em><a class="el" href="../../d9/d9a/str
           <td class="paramkey"></td>
           <td></td>
           <td class="paramtype"><a class="el" href="../../d3/d41/libdali_8h.html#d46ecd16ed2b512a60d5f948fa15a31f">dltime_t</a>&nbsp;</td>
-          <td class="paramname"> <em>datatime</em>, </td>
+          <td class="paramname"> <em>datastart</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"><a class="el" href="../../d3/d41/libdali_8h.html#d46ecd16ed2b512a60d5f948fa15a31f">dltime_t</a>&nbsp;</td>
+          <td class="paramname"> <em>dataend</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
@@ -729,7 +735,8 @@ When an acknowledgement from the server has been requested this routine will rec
     <tr><td valign="top"></td><td valign="top"><em>packet</em>&nbsp;</td><td>Packet data buffer to send </td></tr>
     <tr><td valign="top"></td><td valign="top"><em>packetlen</em>&nbsp;</td><td>Length of data in bytes to send from <em>packet</em> </td></tr>
     <tr><td valign="top"></td><td valign="top"><em>streamid</em>&nbsp;</td><td>Stream ID of packet </td></tr>
-    <tr><td valign="top"></td><td valign="top"><em>datatime</em>&nbsp;</td><td>Data time for packet </td></tr>
+    <tr><td valign="top"></td><td valign="top"><em>datastart</em>&nbsp;</td><td>Data start time for packet </td></tr>
+    <tr><td valign="top"></td><td valign="top"><em>dataend</em>&nbsp;</td><td>Data end time for packet </td></tr>
     <tr><td valign="top"></td><td valign="top"><em>ack</em>&nbsp;</td><td>Acknowledgement flag, if true request acknowledgement</td></tr>
   </table>
 </dl>
@@ -738,7 +745,7 @@ When an acknowledgement from the server has been requested this routine will rec
 </div>
 </div><p>
 </div>
-<hr size="1"><address style="text-align: right;"><small>Generated on Tue Jul 15 14:04:25 2008 for libdali by&nbsp;
+<hr size="1"><address style="text-align: right;"><small>Generated on Fri Sep 12 15:15:08 2008 for libdali by&nbsp;
 <a href="http://www.doxygen.org/index.html">
 <img src="../../doxygen.png" alt="doxygen" align="middle" border="0"></a> 1.5.6 </small></address>
 </body>

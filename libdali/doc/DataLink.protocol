@@ -1,6 +1,6 @@
 
 DataLink protocol 1.0
-2008/7/14
+2008/9/12
 
 --------------------------  General concepts  ------------------------------
 
@@ -21,7 +21,7 @@ ASCII characters with the exception of a single byte length parameter
 Various client commands and server responses contain time stamps
 represented as high-precision time values defined as Unix/POSIX epoch
 times in microseconds.  These high-precision time values are
-abbreviated to 'hptime', 'hppkttime' or 'hpdatatime'.
+abbreviated to 'hptime', 'hppkttime', 'hpdatastart' or 'hpdataend'.
 
 
 -----------------------   DataLink packet structure   ----------------------
@@ -69,7 +69,7 @@ POSITION SET pktid hppkttime
 
 POSITION AFTER hptime
 
-  Purpose: Set the client read position to first packet with data time after hptime
+  Purpose: Set the client read position to first packet with data start time after hptime
   - Reply is OK|ERROR with value as packet ID on success
 
 
@@ -89,7 +89,7 @@ REJECT size|<reject pattern of length size>
   - Reply is OK|ERROR with value as number currently rejected streams
 
 
-WRITE streamid hpdatatime flags size|<packet data of length size>
+WRITE streamid hpdatastart hpdataend flags size|<packet data of length size>
 
   Purpose: Send data packet to DataLink server
   - Flags: "N" = no acknowledgement requested, "A" = acknowledgement requested
@@ -144,7 +144,7 @@ INFO type size|<XML info data of length size>
   - Size in the header is the length of the XML in bytes
 
 
-PACKET <streamid> <pktid> <hppackettime> <hpdatatime> <size>|<packet data of length size>
+PACKET <streamid> <pktid> <hppackettime> <hpdatastart> <hpdataend> <size>|<packet data of length size>
 
   Purpose: Send data packets to client
   - Size in the header is the length of the packet data in bytes
@@ -154,7 +154,8 @@ PACKET <streamid> <pktid> <hppackettime> <hpdatatime> <size>|<packet data of len
   - Stream ID :: A string identifying a data stream in W_X_Y_Z/TYPE format
   - Packet ID :: An integer ID, unique within a DataLink server at any given time
   - Packet Time :: Time that a packet was accepted by the DataLink server
-  - Data Time :: Time associated with the data in the packet
+  - Data Start :: Start time associated with the data in the packet
+  - Data End :: End time associated with the data in the packet
   - Data Size :: Length of the data section of the packet in bytes
 
   The combination of packet ID and packet time uniquely identify a
@@ -175,7 +176,7 @@ S: ID DataLink 2008.196 :: DLPROTO:1.0 PACKETSIZE:512
 C: MATCH 9|IU_ANMO.*
 S: OK 10 31|10 streams selected after match
 C: STREAM
-S: PACKET IU_ANMO_00_BH1/MSEED 3973329 1216097732215400 1216097361127600 512|<packet data>
-S: PACKET IU_ANMO_00_BH2/MSEED 3973330 1216097732875400 1216097362789500 512|<packet data>
-S: PACKET IU_ANMO_00_BHZ/MSEED 3973331 1216097732784300 1216097361789600 512|<packet data>
+S: PACKET IU_ANMO_00_BH1/MSEED 3973329 1216097732215400 1216097361127600 1216097381127600 512|<packet data>
+S: PACKET IU_ANMO_00_BH2/MSEED 3973330 1216097732875400 1216097362789500 1216097382789500 512|<packet data>
+S: PACKET IU_ANMO_00_BHZ/MSEED 3973331 1216097732784300 1216097361789600 1216097381789600 512|<packet data>
 ... <more packets until either a connection shutdown or ENDSTREAM command>

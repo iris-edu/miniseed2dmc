@@ -78,7 +78,7 @@ There are a number of functions to assist with the creation of a <a class="el" h
 <a class="el" href="d5/d5f/connection_8c.html#ffcdbcae2611a8c6208243bc2a418149" title="Set the packet reject parameters for a connection.">dl_reject()</a> : Send a new regular expression rejecting pattern to the DataLink server, the antithesis of the matching pattern.<h2><a class="anchor" name="basic">
 Fundamental read, write and query</a></h2>
 <a class="el" href="d5/d5f/connection_8c.html#9a49f3842de1a14030b20e665bfcbf31" title="Request a packet from the DataLink server.">dl_read()</a> : Read a specific packet from a DataLink server.<p>
-<a class="el" href="d5/d5f/connection_8c.html#9a230b88779edf1efcd67f85ae887e58" title="Send a packet to the DataLink server.">dl_write()</a> : Write a supplied packet to a DataLink server.<p>
+<a class="el" href="d5/d5f/connection_8c.html#6a21194a1a308eb91db0d32bced621f8" title="Send a packet to the DataLink server.">dl_write()</a> : Write a supplied packet to a DataLink server.<p>
 <a class="el" href="d5/d5f/connection_8c.html#812ede0c3d5e15ab118c489087b01260" title="Request information from the DataLink server.">dl_getinfo()</a> : Submit an INFO request to and collect the response from a DataLink server. Responses are in XML. Request types include STATUS, STREAMS and CONNECTIONS.<h2><a class="anchor" name="connmanager">
 Using the connection manager</a></h2>
 Two primary functions are provided to collect packets from a DataLink server in streaming mode: <a class="el" href="d5/d5f/connection_8c.html#ccca46f231c23fd495bb6d5725e97957" title="Collect packets streaming from the DataLink server.">dl_collect()</a> and <a class="el" href="d5/d5f/connection_8c.html#a1343fa010d7cce001da5fb4a231dcd7" title="Collect packets streaming from the DataLink server without blocking.">dl_collect_nb()</a>.<p>
@@ -100,7 +100,7 @@ Threaded programming</a></h2>
 The library is generally thread-safe on Unix-like platforms as long as each thread manages it's own DataLink Connection Parameters (see below). The one exeception is the handling of network I/O timeouts. On systems where the SO_RCVTIMEO and SO_SNDTIMEO socket options are not supported (e.g. Solaris) an alarm timer is used (see setitimer(2)) which, on most systems, utilizes the SIGALARM signal which can be misdirected to an unexpected thread. In this case it is suggested to disable the libdali timeout (set <a class="el" href="d9/d9a/struct_d_l_c_p.html#7a91aad2b1d0ecb361e5115ad62b899d">DLCP.iotimeout</a> = 0) and implement another timeout mechanism if desired. The library is definitely not thread-safe under Win32.<h2><a class="anchor" name="example">
 Programming example</a></h2>
 See the example DataLink client included with the library in the "example" directory. </div>
-<hr size="1"><address style="text-align: right;"><small>Generated on Tue Jul 15 14:04:25 2008 for libdali by&nbsp;
+<hr size="1"><address style="text-align: right;"><small>Generated on Fri Sep 12 15:15:07 2008 for libdali by&nbsp;
 <a href="http://www.doxygen.org/index.html">
 <img src="doxygen.png" alt="doxygen" align="middle" border="0"></a> 1.5.6 </small></address>
 </body>

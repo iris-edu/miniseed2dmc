@@ -41,7 +41,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.252"
+#define VERSION "2008.256"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -242,11 +242,12 @@ processfile (FileLink *file)
   MSRecord *msr = 0;
   char streamid[100];
   off_t filepos;
+  hptime_t endtime;
   int retcode = MS_ENDOFFILE;
   int retval = 0;
   
   lprintf (3, "Processing file %s", file->name);
-
+  
   /* Reset byte and record counters */
   file->bytecount = 0;
   file->recordcount = 0;
@@ -259,10 +260,12 @@ processfile (FileLink *file)
       msr_srcname (msr, streamid, 0);
       strcat (streamid, "/MSEED");
       
+      endtime = msr_endtime (msr);
+      
       lprintf (4, "Sending %s", streamid);
       
       /* Send record to server */
-      if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, writeack) < 0 )
+      if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
 	{
 	  retval = -1;
 	  break;

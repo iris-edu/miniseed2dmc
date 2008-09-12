@@ -5,7 +5,7 @@
  *
  * @author Chad Trabant, IRIS Data Management Center
  *
- * modified: 2008.193
+ * modified: 2008.256
  ***************************************************************************/
 
 #include <stdlib.h>
@@ -283,8 +283,8 @@ dl_position (DLCP *dlconn, int64_t pktid, dltime_t pkttime)
 /***********************************************************************//**
  * @brief Position the client read position based on data time
  *
- * Set the client read position to the first packet with a data time
- * after a reference @a datatime.  The reference time must be
+ * Set the client read position to the first packet with a data end
+ * time after a reference @a datatime.  The reference time must be
  * specified as a dltime_t value, see dl_time2dltime() and friends to
  * generate these time values.
  *
@@ -501,7 +501,8 @@ dl_reject (DLCP *dlconn, char *rejectpattern)
  * @param packet Packet data buffer to send
  * @param packetlen Length of data in bytes to send from @a packet
  * @param streamid Stream ID of packet
- * @param datatime Data time for packet
+ * @param datastart Data start time for packet
+ * @param dataend Data end time for packet
  * @param ack Acknowledgement flag, if true request acknowledgement
  *
  * @return -1 on error and 0 on success when no acknowledgement is
@@ -510,7 +511,7 @@ dl_reject (DLCP *dlconn, char *rejectpattern)
  ***************************************************************************/
 int64_t
 dl_write (DLCP *dlconn, void *packet, int packetlen, char *streamid,
-	  dltime_t datatime, int ack)
+	  dltime_t datastart, dltime_t dataend, int ack)
 {
   int64_t replyvalue = 0;
   char reply[255];
@@ -542,10 +543,10 @@ dl_write (DLCP *dlconn, void *packet, int packetlen, char *streamid,
       return -1;
     }
   
-  /* Create packet header with command: "WRITE streamid hpdatatime flags size" */
+  /* Create packet header with command: "WRITE streamid hpdatastart hpdataend flags size" */
   headerlen = snprintf (header, sizeof(header),
-			"WRITE %s %lld %s %d",
-			streamid, datatime, flags, packetlen);
+			"WRITE %s %lld %lld %s %d",
+			streamid, datastart, dataend, flags, packetlen);
   
   /* Send command and packet to server */
   replylen = dl_sendpacket (dlconn, header, headerlen,
@@ -646,11 +647,11 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
   if ( ! strncmp (header, "PACKET", 6) )
     {
       /* Parse PACKET header */
-      rv = sscanf (header, "PACKET %s %lld %lld %lld %d",
+      rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
 		   packet->streamid, &(packet->pktid), &(packet->pkttime),
-		   &(packet->datatime), &(packet->datasize));
+		   &(packet->datastart), &(packet->dataend), &(packet->datasize));
       
-      if ( rv != 5 )
+      if ( rv != 6 )
 	{
 	  dl_log_r (dlconn, 2, 0, "[%s] dl_read(): cannot parse PACKET header\n",
 		    dlconn->addr);
@@ -674,7 +675,7 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
 			dlconn->addr, packet->datasize);
 	      return -1;
 	    }
-
+	  
 	  /* Consume packet data */
 	  if ( (rv = dl_recvdata (dlconn, discard, packet->datasize, 1)) != packet->datasize )
 	    {
@@ -1011,9 +1012,9 @@ dl_collect (DLCP *dlconn, DLPacket *packet, void *packetdata,
 	      if ( ! strncmp (header, "PACKET", 6) )
 		{
 		  /* Parse PACKET header */
-		  rv = sscanf (header, "PACKET %s %lld %lld %lld %d",
+		  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
 			       packet->streamid, &(packet->pktid), &(packet->pkttime),
-			       &(packet->datatime), &(packet->datasize));
+			       &(packet->datastart), &(packet->dataend), &(packet->datasize));
 		  
 		  if ( rv != 5 )
 		    {
@@ -1219,9 +1220,9 @@ dl_collect_nb (DLCP *dlconn, DLPacket *packet, void *packetdata,
       if ( ! strncmp (header, "PACKET", 6) )
 	{
 	  /* Parse PACKET header */
-	  rv = sscanf (header, "PACKET %s %lld %lld %lld %d",
+	  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
 		       packet->streamid, &(packet->pktid), &(packet->pkttime),
-		       &(packet->datatime), &(packet->datasize));
+		       &(packet->datastart), &(packet->dataend), &(packet->datasize));
 	  
 	  if ( rv != 5 )
 	    {

@@ -1,3 +1,8 @@
+2008.256: 1.1
+	- DataLink protocol addition of packet end time changes, this
+	modified the WRITE command and PACKET response to include
+	both the packt data start and end times. 
+	
 2008.196: 1.0
 	- Do not fail if setsockopt() failed to set socket timeouts.
 
