@@ -100,7 +100,7 @@ Threaded programming</a></h2>
 The library is generally thread-safe on Unix-like platforms as long as each thread manages it's own DataLink Connection Parameters (see below). The one exeception is the handling of network I/O timeouts. On systems where the SO_RCVTIMEO and SO_SNDTIMEO socket options are not supported (e.g. Solaris) an alarm timer is used (see setitimer(2)) which, on most systems, utilizes the SIGALARM signal which can be misdirected to an unexpected thread. In this case it is suggested to disable the libdali timeout (set <a class="el" href="d9/d9a/struct_d_l_c_p.html#7a91aad2b1d0ecb361e5115ad62b899d">DLCP.iotimeout</a> = 0) and implement another timeout mechanism if desired. The library is definitely not thread-safe under Win32.<h2><a class="anchor" name="example">
 Programming example</a></h2>
 See the example DataLink client included with the library in the "example" directory. </div>
-<hr size="1"><address style="text-align: right;"><small>Generated on Fri Sep 12 15:15:07 2008 for libdali by&nbsp;
+<hr size="1"><address style="text-align: right;"><small>Generated on Fri Sep 12 15:38:52 2008 for libdali by&nbsp;
 <a href="http://www.doxygen.org/index.html">
 <img src="doxygen.png" alt="doxygen" align="middle" border="0"></a> 1.5.6 </small></address>
 </body>

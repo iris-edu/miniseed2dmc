@@ -1,4 +1,4 @@
-/***********************************************************************//**
+ /***********************************************************************//**
  * @file connection.c
  *
  * Routines for managing a connection with a DataLink server.
@@ -1016,7 +1016,7 @@ dl_collect (DLCP *dlconn, DLPacket *packet, void *packetdata,
 			       packet->streamid, &(packet->pktid), &(packet->pkttime),
 			       &(packet->datastart), &(packet->dataend), &(packet->datasize));
 		  
-		  if ( rv != 5 )
+		  if ( rv != 6 )
 		    {
 		      dl_log_r (dlconn, 2, 0, "[%s] dl_collect(): cannot parse PACKET header\n",
 				dlconn->addr);
@@ -1224,7 +1224,7 @@ dl_collect_nb (DLCP *dlconn, DLPacket *packet, void *packetdata,
 		       packet->streamid, &(packet->pktid), &(packet->pkttime),
 		       &(packet->datastart), &(packet->dataend), &(packet->datasize));
 	  
-	  if ( rv != 5 )
+	  if ( rv != 6 )
 	    {
 	      dl_log_r (dlconn, 2, 0, "[%s] dl_collect_nb(): cannot parse PACKET header\n",
 			dlconn->addr);
