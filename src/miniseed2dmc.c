@@ -995,6 +995,7 @@ usage()
 	  " -NA            Do not require the server to acknowledge each packet received NOTDONE\n"
 	  
 	  " -S file        State file to save/restore file time stamps\n"
+          "\n"
 	  );
   exit (1);
 }  /* End of usage() */
