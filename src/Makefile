@@ -10,7 +10,7 @@ LDLIBS  = -lmseed -ldali
 
 BIN  = ../miniseed2dmc
 
-OBJS = seedutil.o edir.o miniseed2dmc.o
+OBJS = edir.o miniseed2dmc.o
 
 all: $(BIN)
 

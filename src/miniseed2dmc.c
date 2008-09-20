@@ -37,7 +37,6 @@
 #include <libmseed.h>
 #include <libdali.h>
 
-#include "seedutil.h"
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
