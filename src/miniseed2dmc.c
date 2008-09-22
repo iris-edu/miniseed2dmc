@@ -13,8 +13,19 @@
  * Chad Trabant, IRIS Data Management Center
  ***************************************************************************/
 
-/* _GNU_SOURCE needed to get pread() under Linux */
-#define _GNU_SOURCE
+/* ToDo:
+
+- Input as files
+- Input as directories, identified gets recused
+- Input as @listfile or -l
+
+- Write hpSYNC file
+
+- IO stats at intervals in addition to file endings
+
+- state file resuming?  Does not work with ms_readfile(), can't set initial offset
+
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,7 +51,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.256"
+#define VERSION "2008.266"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -167,7 +178,7 @@ main (int argc, char** argv)
 	      /* If that was the last file set the stop signal */
 	      if ( ! file->next )
 		stopsig = 1;
-	      /* Otherwise inrement to the next file in the list */
+	      /* Otherwise increment to the next file in the list */
 	      else
 		file = file->next;
 	      
@@ -269,6 +280,9 @@ processfile (FileLink *file)
 	  retval = -1;
 	  break;
 	}
+      
+      /* Track read position in input file */
+      file->offset = filepos + msr->reclen;
       
       /* Update counts */
       file->bytecount += msr->reclen;
@@ -984,17 +998,17 @@ usage()
 	  " -V             Report program version\n"
 	  " -h             Show this usage message\n"
 	  " -v             Be more verbose, multiple flags can be used\n"
-
+	  
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
 	  
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
 	  
           " -I             Print IO stats during transmission\n"
 	  
-	  " -q             Be quiet, do not print diagnostics or transmission summary NOTDONE\n"
-	  " -NA            Do not require the server to acknowledge each packet received NOTDONE\n"
+	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
+	  " -NA            Do not require the server to acknowledge each packet received\n"
 	  
-	  " -S file        State file to save/restore file time stamps\n"
+	  " -x file        State file to save/restore file time stamps\n"
           "\n"
 	  );
   exit (1);
