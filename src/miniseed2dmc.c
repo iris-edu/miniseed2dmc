@@ -204,21 +204,23 @@ main (int argc, char** argv)
 		      restart = 1;
 		      break;
 		    }
-		  
-		  /* Track read position in input file */
-		  file->offset = filepos + msr->reclen;
-		  
-		  /* Update counts */
-		  file->bytecount += msr->reclen;
-		  file->recordcount++;
-		  
-		  totalbytes += msr->reclen;
-		  totalrecords++;
-		  
-		  /* Add record to trace coverage */
-		  if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
+		  else
 		    {
-		      lprintf (0, "Error adding %s coverage to trace tracking", streamid);
+		      /* Track read position in input file */
+		      file->offset = filepos + msr->reclen;
+		      
+		      /* Update counts */
+		      file->bytecount += msr->reclen;
+		      file->recordcount++;
+		      
+		      totalbytes += msr->reclen;
+		      totalrecords++;
+		      
+		      /* Add record to trace coverage */
+		      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
+			{
+			  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
+			}
 		    }
 		}  /* End of reading records from file */
 	      
