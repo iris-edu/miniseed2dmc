@@ -14,16 +14,20 @@
  ***************************************************************************/
 
 /* ToDo:
+   
+- D Input as files
+- D Input as directories, identified gets recursed
+- D Input as @listfile or -l
 
-- Input as files
-- Input as directories, identified gets recused
-- Input as @listfile or -l
+- D Write hpSYNC file
 
-- Write hpSYNC file
+- Resume connection on breakage
 
 - IO stats at intervals in addition to file endings
 
 - state file resuming?  Does not work with ms_readfile(), can't set initial offset
+
+- return consistent value for all sent or not
 
 */
 
@@ -51,7 +55,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.266"
+#define VERSION "2008.271"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -79,6 +83,7 @@ static int   iostats       = 0;    /* Output IO stats */
 static int   quiet         = 0;    /* Quiet mode */
 static int   quitonerror   = 0;    /* Quit program on connection errors */
 static int   reconnect     = 60;   /* Reconnect delay if not quittng on errors */
+static int   syncfile      = 1;    /* SYNC file for writing data coverage */
 static char *statefile     = 0;    /* State file for saving/restoring time stamps */
 
 static uint64_t inputbytes = 0;    /* Total size for all input files */
@@ -87,15 +92,16 @@ static uint64_t totalrecords = 0;  /* Track count of total records sent */
 static uint64_t totalfiles = 0;    /* Track count of total files sent */
 static MSTraceGroup *traces = 0;   /* Track all trace segments sent */
 
-static int    adddir (char *targetdir, char *basedir, int level);
-static int    processfile (FileLink *file);
 static void   printfilelist (FILE *fd);
+static int    writesync (MSTraceGroup *mstg, time_t start, time_t end);
 static int    savestate (char *statefile);
 static int    recoverstate (char *statefile);
 static int    processparam (int argcount, char **argvec);
 static char  *getoptval (int argcount, char **argvec, int argopt);
-static int    addfile (char *filename);
-static int    processlistfile (char *filename);
+static int    addfile (FileLink **list, char *filename, struct stat *stp);
+static int    adddir (char *targetdir, char *basedir, int level);
+static int    addlistfile (char *filename);
+static int    freelist (FileLink **list);
 static void   term_handler();
 static void   print_handler();
 static void   lprintf0 (char *message);
@@ -109,11 +115,18 @@ main (int argc, char** argv)
 {
   FileLink *file;
   struct timeval procstart;
+  struct timeval procend;
   struct timeval filestart;
   struct timeval now;
   struct timespec rcsleep;
   double iostatsinterval;
-  int pret;
+  int restart = 0;
+  
+  MSRecord *msr = 0;
+  char streamid[100];
+  off_t filepos;
+  hptime_t endtime;
+  int retcode = MS_ENDOFFILE;
   
   /* Signal handling using POSIX routines */
   struct sigaction sa;
@@ -144,8 +157,7 @@ main (int argc, char** argv)
   traces = mst_initgroup (traces);
   
   /* Set processing start time */
-  if ( iostats )
-    gettimeofday (&procstart, NULL);
+  gettimeofday (&procstart, NULL);
   
   /* Start scan sequence */
   while ( ! stopsig )
@@ -159,29 +171,74 @@ main (int argc, char** argv)
 	}
       else
 	{
-	  while ( file && ! stopsig )
+	  restart = 0;
+	  
+	  while ( file && ! restart && ! stopsig )
 	    {
 	      if ( iostats )
 		{
 		  gettimeofday (&filestart, NULL);
 		}
 	      
-	      if ( (pret = processfile (file)) )
+	      lprintf (3, "Processing file %s", file->name);
+	      
+	      /* Reset byte and record counters */
+	      file->bytecount = 0;
+	      file->recordcount = 0;
+	      
+	      /* Read all data records from file and send to the server */
+	      while ( ! stopsig &&
+		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
 		{
-		  /* Shutdown if the error was a file read */
-		  if ( pret == -2 )
-		    stopsig = 1;
+		  /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
+		  msr_srcname (msr, streamid, 0);
+		  strcat (streamid, "/MSEED");
 		  
-		  break;
+		  endtime = msr_endtime (msr);
+		  
+		  lprintf (4, "Sending %s", streamid);
+		  
+		  /* Send record to server */
+		  if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
+		    {
+		      restart = 1;
+		      break;
+		    }
+		  
+		  /* Track read position in input file */
+		  file->offset = filepos + msr->reclen;
+		  
+		  /* Update counts */
+		  file->bytecount += msr->reclen;
+		  file->recordcount++;
+		  
+		  totalbytes += msr->reclen;
+		  totalrecords++;
+		  
+		  /* Add record to trace coverage */
+		  if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
+		    {
+		      lprintf (0, "Error adding %s coverage to trace tracking", streamid);
+		    }
+		}  /* End of reading records from file */
+	      
+	      totalfiles++;
+	      
+	      /* Print error if not EOF and set shutdown signal */
+	      if ( retcode != MS_ENDOFFILE && ! restart )
+		{
+		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
+		  stopsig = 1;
 		}
 	      
-	      /* If that was the last file set the stop signal */
-	      if ( ! file->next )
-		stopsig = 1;
-	      /* Otherwise increment to the next file in the list */
-	      else
-		file = file->next;
+	      /* Make sure everything is cleaned up */
+	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
 	      
+	      if ( ! quiet )
+		lprintf (0, "%s: sent %llu bytes in %llu records",
+			 file->name, file->bytecount, file->recordcount);
+	      
+	      /* Print IO stats */
 	      if ( iostats )
 		{
 		  /* Determine run time since filestart was set */
@@ -192,10 +249,17 @@ main (int argc, char** argv)
 		  
 		  lprintf (0, "%s: sent in %.1f seconds (%.1f bytes/second, %.1f records/second)",
 			   file->name, iostatsinterval,
-			   file->bytecount/iostatsinterval,
-			   file->recordcount/iostatsinterval);
+			   (iostatsinterval)?(file->bytecount/iostatsinterval):0,
+			   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
 		}
-	    }
+	      
+	      /* If that was the last file set the stop signal */
+	      if ( ! file->next )
+		stopsig = 1;
+	      /* Otherwise increment to the next file in the list */
+	      else
+		file = file->next;
+	    } /* End of traversing file list */
 	}
       
       /* Quit on connection errors if requested */
@@ -204,16 +268,18 @@ main (int argc, char** argv)
       
       /* Sleep before reconnecting */
       if ( ! stopsig )
-	nanosleep (&rcsleep, NULL);
-      
+	{
+	  lprintf (0, "Reconnecting in %d seconds", reconnect);
+	  nanosleep (&rcsleep, NULL);
+	}
     } /* End of main scan sequence */
+  
+  /* Set processing end time */
+  gettimeofday (&procend, NULL);
   
   if ( iostats )
     {
-      /* Determine run time since procstart was set */
-      gettimeofday (&now, NULL);
-      
-      iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+      iostatsinterval = ( ((double)procend.tv_sec + (double)procend.tv_usec/1000000) -
 			  ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
       
       lprintf (0, "Time elapsed: %.1f seconds (%.1f bytes/second, %.1f records/second)",
@@ -230,94 +296,19 @@ main (int argc, char** argv)
   if ( statefile )
     savestate (statefile);
   
+  /* Write SYNC file listing for coverage sent */
+  if ( syncfile )
+    writesync (traces, (time_t)procstart.tv_sec, (time_t)procend.tv_sec);
+  
   /* Print trace coverage sent */
-  if ( ! quiet && traces )
+  if ( verbose >= 3 )
     mst_printtracelist (traces, 0, 1, 0);
+  
+  /* Free the global file list */
+  freelist (&filelist);
   
   return 0;
 }  /* End of main() */
-
-
-/***************************************************************************
- * processfile:
- *
- * Process a file by reading any data after the last offset to the end
- * of the file.
- *
- * Return 0 on success and -1 on send error and -2 on file read or other error.
- ***************************************************************************/
-static int
-processfile (FileLink *file)
-{
-  MSRecord *msr = 0;
-  char streamid[100];
-  off_t filepos;
-  hptime_t endtime;
-  int retcode = MS_ENDOFFILE;
-  int retval = 0;
-  
-  lprintf (3, "Processing file %s", file->name);
-  
-  /* Reset byte and record counters */
-  file->bytecount = 0;
-  file->recordcount = 0;
-  
-  /* Read all data records from file and send to the server */
-  while ( ! stopsig &&
-	  (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
-    {
-      /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
-      msr_srcname (msr, streamid, 0);
-      strcat (streamid, "/MSEED");
-      
-      endtime = msr_endtime (msr);
-      
-      lprintf (4, "Sending %s", streamid);
-      
-      /* Send record to server */
-      if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
-	{
-	  retval = -1;
-	  break;
-	}
-      
-      /* Track read position in input file */
-      file->offset = filepos + msr->reclen;
-      
-      /* Update counts */
-      file->bytecount += msr->reclen;
-      file->recordcount++;
-      
-      totalbytes += msr->reclen;
-      totalrecords++;
-      
-      /* Add record to trace coverage */
-      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
-	{
-	  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
-	}
-    }
-  
-  totalfiles++;
-  
-  /* Print error if not EOF */
-  if ( retcode != MS_ENDOFFILE && ! retval )
-    {
-      lprintf (0, "retcode: %d, retval: %d, stopsig: %d", retcode, retval, stopsig);
-
-      lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
-      retval = -2;
-    }
-  
-  /* Make sure everything is cleaned up */
-  ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
-  
-  if ( file->recordcount )
-    lprintf (2, "Sent %d bytes of %d record(s) from %s",
-	     file->bytecount, file->recordcount, file->name);
-  
-  return retval;
-}  /* End of processfile() */
 
 
 /***************************************************************************
@@ -342,6 +333,75 @@ printfilelist (FILE *fp)
   
   return;
 }  /* End of printfilelist() */
+
+
+/***************************************************************************
+ * writesync:
+ *
+ * Write trace coverage for the given MSTraceGroup to a SYNC file.
+ *
+ * Returns 0 on success and -1 on error.
+ ***************************************************************************/
+static int
+writesync (MSTraceGroup *mstg, time_t start, time_t end)
+{
+  MSTrace *mst;
+  FILE *sf = 0;
+  time_t now;
+  struct tm *nt;
+  struct tm *st;
+  struct tm *et;
+  char yearday[10];
+  char starttime[50];
+  char endtime[50];
+  char filename[MAX_FILENAME_LENGTH];
+  
+  if ( ! mstg )
+    return -1;
+  
+  mst = mstg->traces;
+  
+  /* Generate current time stamp */
+  now = time (NULL);
+  nt = localtime ( &now ); nt->tm_year += 1900; nt->tm_yday += 1;
+  snprintf ( yearday, sizeof(yearday), "%04d,%03d", nt->tm_year, nt->tm_yday);
+  
+  /* Generate sync file name */
+  st = localtime ( &start ); st->tm_year += 1900; st->tm_mon += 1;
+  et = localtime ( &end ); et->tm_year += 1900; et->tm_mon += 1;
+  snprintf ( filename, sizeof(filename),
+	     "%04d-%02d-%02dT%02d:%02d:%02d--%04d-%02d-%02dT%02d:%02d:%02d.sync",
+	     st->tm_year, st->tm_mon, st->tm_mday, st->tm_hour, st->tm_min, st->tm_sec,
+	     et->tm_year, et->tm_mon, et->tm_mday, et->tm_hour, et->tm_min, et->tm_sec);
+  
+  /* Open sync file */
+  if ( ! (sf = fopen (filename, "w")) )
+    {
+      lprintf (0, "Error opening SYNC file %s: %s", filename, strerror(errno));
+      return -1;
+    }
+  
+  /* Trace MSTrace list and print SYNC lines */
+  while ( mst )
+    {
+      ms_hptime2seedtimestr (mst->starttime, starttime, 1);
+      ms_hptime2seedtimestr (mst->endtime, endtime, 1);
+      
+      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d||||||%s||\n",
+	       mst->network, mst->station, mst->location, mst->channel,
+	       starttime, endtime, mst->samprate, mst->samplecnt,
+	       yearday);
+      
+      mst = mst->next;
+    }
+  
+  if ( sf )
+    fclose (sf);
+  
+  lprintf (1, "Wrote SYNC file listing to %s", filename);
+  
+  return 0;
+}  /* End of writesync() */
 
 
 /***************************************************************************
@@ -487,6 +547,7 @@ recoverstate (char *statefile)
 static int
 processparam (int argcount, char **argvec)
 {
+  FileLink *listfiles = 0;
   char *address = 0;
   char *tptr;
   int optind;
@@ -523,6 +584,10 @@ processparam (int argcount, char **argvec)
         {
           maxrecur = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
         }
+      else if (strcmp (argvec[optind], "-NS") == 0)
+        {
+          syncfile = 0;
+        }
       else if (strcmp (argvec[optind], "-NA") == 0)
         {
           writeack = 0;
@@ -531,6 +596,10 @@ processparam (int argcount, char **argvec)
         {
           statefile = getoptval(argcount, argvec, optind++);
         }
+      else if (strcmp (argvec[optind], "-l") == 0)
+        {
+	  addfile (&listfiles, getoptval(argcount, argvec, optind++), NULL);
+	}
       else if (strncmp (argvec[optind], "-", 1) == 0)
         {
           lprintf (0, "Unknown option: %s", argvec[optind]);
@@ -548,16 +617,16 @@ processparam (int argcount, char **argvec)
 	  /* Otherwise check for an input file list */
 	  else if ( tptr[0] == '@' )
 	    {
-	      if ( processlistfile ( tptr+1 ) < 0 )
+	      if ( addfile (&listfiles, tptr+1, NULL) < 0 )
 		{
-		  lprintf (0, "Error processing list file %s", tptr+1);
+		  lprintf (0, "Error adding list file %s", tptr+1);
 		  exit (1);
 		}
 	    }
 	  /* Otherwise this is an input file */
 	  else
 	    {
-	      if ( addfile ( tptr ) < 0 )
+	      if ( addfile (NULL, tptr, NULL) < 0 )
 		{
 		  lprintf (0, "Error adding input file %s", tptr+1);
 		  exit (1);
@@ -584,7 +653,26 @@ processparam (int argcount, char **argvec)
   dl_loginit (verbose-2, &lprintf0, "", &lprintf0, "");
   
   /* Report the program version */
-  lprintf (0, "%s version: %s", PACKAGE, VERSION);
+  if ( ! quiet )
+    lprintf (0, "%s version: %s", PACKAGE, VERSION);
+  
+  /* Process any list files and free the list of lists */
+  if ( listfiles )
+    {
+      FileLink *listfile = listfiles;
+      while ( listfile )
+	{
+	  if ( addlistfile ( listfile->name ) < 0 )
+	    {
+	      lprintf (0, "Error processing list file %s", listfile);
+	      exit (1);
+	    }
+	  
+	  listfile = listfile->next;
+	}
+      
+      freelist ( &listfile );
+    }
   
   /* Make sure input files/dirs specified */
   if ( filelist == 0 )
@@ -638,14 +726,16 @@ getoptval (int argcount, char **argvec, int argopt)
 /***************************************************************************
  * addfile:
  *
- * Add file to end of the global file list (filelist).
+ * Add file to end of a list, as a special case when list == NULL the
+ * file will be added to the global file list (filelist).
  *
  * Return 0 on success and -1 on error.
  ***************************************************************************/
 static int
-addfile (char *filename)
+addfile (FileLink **list, char *filename, struct stat *stp)
 {
   FileLink *newfile;
+  FileLink *last;
   struct stat st;
   int filelen;
   
@@ -657,19 +747,32 @@ addfile (char *filename)
   
   filelen = strlen (filename);
   
+  /* Check file name length */
+  if ( filelen > MAX_FILENAME_LENGTH )
+    {
+      lprintf (0, "File name longer than maximum allowd (%d): '%s'",
+	       MAX_FILENAME_LENGTH, filename);
+      return -1;
+    }
+  
   /* Remove trailing slash if included */
   if ( filename[filelen-1] == '/' )
     filename[filelen-1] = '\0';
   
-  /* Stat file */
-  if ( stat (filename, &st) )
+  /* Stat file unless a struct stat pointer is provieded */
+  if ( stp == NULL )
     {
-      lprintf (0, "Error: could not find '%s': %s", filename, strerror(errno));
-      return -1;
+      if ( stat (filename, &st) )
+	{
+	  lprintf (0, "Error: could not find '%s': %s", filename, strerror(errno));
+	  return -1;
+	}
+      
+      stp = &st;
     }
   
   /* If the file is actually a directory add files it contains recursively */
-  if ( S_ISDIR(st.st_mode) )
+  if ( S_ISDIR(stp->st_mode) )
     {
       if ( adddir (filename, filename, maxrecur) )
 	{
@@ -677,7 +780,7 @@ addfile (char *filename)
 	}
     }
   /* If the file is a regular file add it to the input list */
-  else if ( S_ISREG(st.st_mode) )
+  else if ( S_ISREG(stp->st_mode) )
     {
       /* Create the new FileLink */
       if ( ! (newfile = (FileLink *) malloc (sizeof(FileLink)+filelen+1)) )
@@ -686,26 +789,45 @@ addfile (char *filename)
 	  return -1;
 	}
       
-      memcpy (newfile->name, filename, filelen+1);
+      newfile->next = 0;
       newfile->offset = 0;
-      newfile->size = st.st_size;
+      newfile->size = stp->st_size;
       newfile->bytecount = 0;
       newfile->recordcount = 0;
-      newfile->next = 0;
+      memcpy (newfile->name, filename, filelen+1);
       
-      inputbytes += st.st_size;
+      inputbytes += stp->st_size;
       
-      /* Insert the new FileLink at the end of the input list */
-      if ( lastfile == 0 )
-	filelist = newfile;
+      /* Insert the new FileLink at the end of the global input list */
+      if ( ! list || list == &filelist )
+	{
+	  if ( lastfile == 0 )
+	    filelist = newfile;
+	  else
+	    lastfile->next = newfile;
+	  
+	  lastfile = newfile;
+	}
+      /* Otherwise insert the new FileLink at the end of the specified list */
       else
-	lastfile->next = newfile;
-      
-      lastfile = newfile;
+	{
+	  last = *list;
+	  if ( ! last )
+	    {
+	      /* Add first entry for first link */
+	      *list = newfile;
+	    }
+	  else
+	    {
+	      /* Find last entry and insert the new link */
+	      while ( last->next ) { last = last->next; }
+	      last->next = newfile;
+	    }
+	}
     }
   else
     {
-      lprintf (0, "ERROR: '%s' is not a regular file or directory", filename);
+      lprintf (0, "Error: '%s' is not a regular file or directory", filename);
       return -1;
     }
   
@@ -821,7 +943,7 @@ adddir (char *targetdir, char *basedir, int level)
 	}
       
       /* Add file to input list */
-      if ( addfile ( filename ) < 0 )
+      if ( addfile ( NULL, filename, &st ) < 0 )
 	{
 	  lprintf (0, "Error adding input file %s", filename);
 	  return -1;
@@ -844,21 +966,21 @@ adddir (char *targetdir, char *basedir, int level)
 
 
 /***************************************************************************
- * processlistfile:
+ * addlistfile:
  *
  * Add files listed in the specified file to the global input file list.
  *
  * Returns count of files added on success and -1 on error.
  ***************************************************************************/
 static int
-processlistfile (char *filename) 
+addlistfile (char *filename) 
 {
   FILE *fp;
   char filelistent[MAX_FILENAME_LENGTH];
   int filecount = 0;
   int rv;
   
-  lprintf (3, "Reading list file '%s'", filename);
+  lprintf (1, "Reading list file '%s'", filename);
   
   if ( ! (fp = fopen(filename, "r")) )
     {
@@ -884,7 +1006,7 @@ processlistfile (char *filename)
       
       lprintf (2, "Adding '%s' from list file", filelistent);
       
-      rv = addfile (filelistent);
+      rv = addfile (NULL, filelistent, NULL);
       
       if ( rv < 0 )
 	{
@@ -898,7 +1020,37 @@ processlistfile (char *filename)
   fclose (fp);
   
   return filecount;
-}  /* End of processlistfile() */
+}  /* End of addlistfile() */
+
+
+/***************************************************************************
+ * freelist:
+ *
+ * Free a FileLink list.
+ *
+ * Return 0 on success and -1 on error.
+ ***************************************************************************/
+static int
+freelist (FileLink **list)
+{
+  FileLink *file;
+  FileLink *next;
+  
+  if ( ! list )
+    return -1;
+  
+  file = *list;
+  while ( file )
+    {
+      next = file->next;
+      free (file);
+      file = next;
+    }
+  
+  *list = 0;
+  
+  return 0;
+}  /* End of freelist() */
 
 
 /***************************************************************************
@@ -961,23 +1113,23 @@ lprintf (int level, const char *fmt, ...)
   char *month[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
 		   "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-  if ( level <= verbose ) {
+  if ( level <= verbose )
+    {
+      /* Build local time string and generate final output */
+      curtime = time(NULL);
+      tp = localtime (&curtime);
+      
+      va_start (argptr, fmt);
+      rv = vsnprintf (message, sizeof(message), fmt, argptr);
+      va_end (argptr);
     
-    /* Build local time string and generate final output */
-    curtime = time(NULL);
-    tp = localtime (&curtime);
-    
-    va_start (argptr, fmt);
-    rv = vsnprintf (message, sizeof(message), fmt, argptr);
-    va_end (argptr);
-    
-    printf ("%3.3s %3.3s %2.2d %2.2d:%2.2d:%2.2d %4.4d - %s: %s\n",
-	    day[tp->tm_wday], month[tp->tm_mon], tp->tm_mday,
-	    tp->tm_hour, tp->tm_min, tp->tm_sec, tp->tm_year + 1900,
-	    PACKAGE, message);
-    
-    fflush (stdout);
-  }
+      printf ("%3.3s %3.3s %2.2d %2.2d:%2.2d:%2.2d %4.4d - %s: %s\n",
+	      day[tp->tm_wday], month[tp->tm_mon], tp->tm_mday,
+	      tp->tm_hour, tp->tm_min, tp->tm_sec, tp->tm_year + 1900,
+	      PACKAGE, message);
+      
+      fflush (stdout);
+    }
   
   return rv;
 }  /* End of lprintf() */
@@ -1004,11 +1156,12 @@ usage()
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
 	  
           " -I             Print IO stats during transmission\n"
-	  
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
+	  " -NS            Do not write a SYNC file after sending data\n"
 	  " -NA            Do not require the server to acknowledge each packet received\n"
 	  
-	  " -x file        State file to save/restore file time stamps\n"
+	  " -S file        State file to save/restore file time stamps\n"
+	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
           "\n"
 	  );
   exit (1);
