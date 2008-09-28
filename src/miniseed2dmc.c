@@ -55,7 +55,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.271"
+#define VERSION "2008.272"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -398,7 +398,7 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
   if ( sf )
     fclose (sf);
   
-  lprintf (1, "Wrote SYNC file listing to %s", filename);
+  lprintf (1, "Wrote SYNC file %s", filename);
   
   return 0;
 }  /* End of writesync() */
