@@ -14,7 +14,7 @@
  ***************************************************************************/
 
 /* ToDo:
-   
+
 - D Input as files
 - D Input as directories, identified gets recursed
 - D Input as @listfile or -l
@@ -311,6 +311,102 @@ main (int argc, char** argv)
   
   return 0;
 }  /* End of main() */
+
+
+/***************************************************************************
+ * readfile:
+ *
+ * Read MSRecords from a specified file at a specified offset.  If the
+ * specified offset is -1 the next record from the current read
+ * position is returned.
+ *
+ * Return the return vale from ms_readmsr().
+ ***************************************************************************/
+int
+ms_readmsr (MSRecord **ppmsr, char *msfile, off_t offset)
+{
+  static MSFileParam *msfp = 0;
+  off_t filepos;
+  int last;
+  
+/* Reading Mini-SEED records from files 
+typedef struct MSFileParam_s
+{
+  FILE *fp;
+  char *rawrec;
+  char  filename[512];
+  int   autodet;
+  int   readlen;
+  int   packtype;
+  off_t packhdroffset;
+  off_t filepos;
+  int   recordcount;
+} MSFileParam;
+*/
+
+  /* Closeout current file if requested */
+  if ( ! msfile )
+    {
+      if ( msfp )
+	{
+	  ms_readmsr_r (&msfp, ppmsr, NULL, -1, NULL, NULL, 1, 0, verbose-2);
+	}
+      
+      msfp = 0;
+      return MS_NOERROR;
+    }
+  
+  /* Read all data records from file and send to the server */
+	      while ( ! stopsig &&
+		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
+		{
+		  /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
+		  msr_srcname (msr, streamid, 0);
+		  strcat (streamid, "/MSEED");
+		  
+		  endtime = msr_endtime (msr);
+		  
+		  lprintf (4, "Sending %s", streamid);
+		  
+		  /* Send record to server */
+		  if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
+		    {
+		      restart = 1;
+		      break;
+		    }
+		  else
+		    {
+		      /* Track read position in input file */
+		      file->offset = filepos + msr->reclen;
+		      
+		      /* Update counts */
+		      file->bytecount += msr->reclen;
+		      file->recordcount++;
+		      
+		      totalbytes += msr->reclen;
+		      totalrecords++;
+		      
+		      /* Add record to trace coverage */
+		      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
+			{
+			  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
+			}
+		    }
+		}  /* End of reading records from file */
+	      
+	      totalfiles++;
+	      
+	      /* Print error if not EOF and set shutdown signal */
+	      if ( retcode != MS_ENDOFFILE && ! restart )
+		{
+		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
+		  stopsig = 1;
+		}
+	      
+	      /* Make sure everything is cleaned up */
+	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
+
+} /* End of readfile() */
 
 
 /***************************************************************************
