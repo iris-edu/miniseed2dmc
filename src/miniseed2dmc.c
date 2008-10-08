@@ -55,7 +55,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.272"
+#define VERSION "2008.282"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -485,7 +485,7 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
       ms_hptime2seedtimestr (mst->starttime, starttime, 1);
       ms_hptime2seedtimestr (mst->endtime, endtime, 1);
       
-      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d||||||%s||\n",
+      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d|||||||%s|\n",
 	       mst->network, mst->station, mst->location, mst->channel,
 	       starttime, endtime, mst->samprate, mst->samplecnt,
 	       yearday);
