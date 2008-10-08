@@ -479,6 +479,9 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
       return -1;
     }
   
+  /* Print header line */
+  fprintf (sf, "DCC|%s\n", yearday);
+  
   /* Trace MSTrace list and print SYNC lines */
   while ( mst )
     {
