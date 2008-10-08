@@ -488,7 +488,7 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
       ms_hptime2seedtimestr (mst->starttime, starttime, 1);
       ms_hptime2seedtimestr (mst->endtime, endtime, 1);
       
-      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d|||||||%s|\n",
+      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d|||||||%s\n",
 	       mst->network, mst->station, mst->location, mst->channel,
 	       starttime, endtime, mst->samprate, mst->samplecnt,
 	       yearday);
