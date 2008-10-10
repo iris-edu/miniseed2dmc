@@ -5,7 +5,7 @@
  *
  * @author Chad Trabant, IRIS Data Management Center
  *
- * modified: 2008.256
+ * modified: 2008.284
  ***************************************************************************/
 
 #include <stdlib.h>

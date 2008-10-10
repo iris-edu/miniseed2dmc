@@ -25,9 +25,13 @@
 
 - D state file resuming
 
-- IO stats at intervals in addition to file endings
+- D IO stats at intervals in addition to file endings
+
+- D skip non-SEED files
 
 - return consistent value for all sent or not
+
+- man page
 
 */
 
@@ -55,7 +59,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.283"
+#define VERSION "2008.284"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -80,6 +84,7 @@ static int   writeack      = 1;    /* Flag to control the request for write acks
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
 static int   iostats       = 0;    /* Output IO stats */
+static int   iostatsint    = 30;   /* Output IO stats interval */
 static int   quiet         = 0;    /* Quiet mode */
 static int   quitonerror   = 0;    /* Quit program on connection errors */
 static int   reconnect     = 60;   /* Reconnect delay if not quitting on errors */
@@ -117,10 +122,12 @@ main (int argc, char** argv)
   struct timeval procstart;
   struct timeval procend;
   struct timeval filestart;
+  struct timeval iostatsprint;
   struct timeval now;
   struct timespec rcsleep;
   double iostatsinterval;
   int restart = 0;
+  int allsent = 0;
   
   MSRecord *msr = 0;
   char streamid[100];
@@ -158,6 +165,8 @@ main (int argc, char** argv)
   
   /* Set processing start time */
   gettimeofday (&procstart, NULL);
+
+  iostatsprint.tv_sec = iostatsprint.tv_usec = 0;
   
   /* Start scan sequence */
   while ( ! stopsig )
@@ -176,6 +185,14 @@ main (int argc, char** argv)
 	  if ( ! quiet )
 	    lprintf (0, "Connected to %s", dlconn->addr);
 	  
+	  if ( ! dlconn->writeperm )
+	    {
+	      lprintf (0, "ERROR Write permission not granted for %s", dlconn->addr);
+	      
+	      stopsig = 1;
+	      break;
+	    }
+	  
 	  while ( file && ! restart && ! stopsig )
 	    {
 	      /* Skip file if already sent */
@@ -192,6 +209,8 @@ main (int argc, char** argv)
 	      if ( iostats )
 		{
 		  gettimeofday (&filestart, NULL);
+		  iostatsprint.tv_sec = filestart.tv_sec + iostatsint;
+		  iostatsprint.tv_usec = 0;
 		}
 	      
 	      lprintf (3, "Sending Mini-SEED from file %s", file->name);
@@ -219,6 +238,7 @@ main (int argc, char** argv)
 		  /* Send record to server */
 		  if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
 		    {
+		      lprintf (0, "Error sending record to %s", dlconn->addr);
 		      restart = 1;
 		      break;
 		    }
@@ -240,35 +260,62 @@ main (int argc, char** argv)
 			  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
 			}
 		    }
+		  
+		  if ( iostats )
+		    {
+		      /* Only print stats if interval has passed */
+		      gettimeofday (&now, NULL);
+		      
+		      if ( iostatsprint.tv_sec < now.tv_sec )
+			{
+			  iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+					      ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
+			  
+			  lprintf (0, "%s: sent %d%% (%.1f bytes/second, %.1f records/second)",
+				   file->name, (int)(100.0 * file->bytecount / file->size),
+				   (iostatsinterval)?(file->bytecount/iostatsinterval):0,
+				   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
+			  
+			  /* Increment iostats print interval time stamp */
+			  iostatsprint.tv_sec += iostatsint;
+			}
+		    }
 		}  /* End of reading records from file */
-	      
-	      /* Print error if not EOF and not set shutdown or restart signal */
-	      if ( retcode != MS_ENDOFFILE && ! stopsig && ! restart )
-		{
-		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
-		  stopsig = 1;
-		}
 	      
 	      /* Make sure everything is cleaned up */
 	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
 	      
-	      if ( ! quiet )
-		lprintf (0, "%s: sent %llu bytes in %llu records",
-			 file->name, file->bytecount, file->recordcount);
-	      
-	      /* Print IO stats */
-	      if ( iostats )
+	      /* Print error if not EOF and not set shutdown or restart signal */
+	      if ( retcode == MS_NOTSEED && file->bytecount == 0 )
 		{
-		  /* Determine run time since filestart was set */
-		  gettimeofday (&now, NULL);
+		  lprintf (0, "%s: no SEED data found, skipping", file->name);
+		  file->bytecount = file->size;
+		}
+	      else if ( retcode != MS_ENDOFFILE && ! stopsig && ! restart )
+		{
+		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
+		  stopsig = 1;
+		}
+	      else
+		{
+		  if ( ! quiet )
+		    lprintf (0, "%s: sent %llu bytes in %llu records",
+			     file->name, file->bytecount, file->recordcount);
 		  
-		  iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
-				      ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
-		  
-		  lprintf (0, "%s: sent in %.1f seconds (%.1f bytes/second, %.1f records/second)",
-			   file->name, iostatsinterval,
-			   (iostatsinterval)?(file->bytecount/iostatsinterval):0,
-			   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
+		  /* Print IO stats */
+		  if ( iostats )
+		    {
+		      /* Determine run time since filestart was set */
+		      gettimeofday (&now, NULL);
+		      
+		      iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+					  ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
+		      
+		      lprintf (0, "%s: sent in %.1f seconds (%.1f bytes/second, %.1f records/second)",
+			       file->name, iostatsinterval,
+			       (iostatsinterval)?(file->bytecount/iostatsinterval):0,
+			       (iostatsinterval)?(file->recordcount/iostatsinterval):0);
+		    }
 		}
 	      
 	      if ( restart )
@@ -323,8 +370,22 @@ main (int argc, char** argv)
     savestate (statefile);
   
   /* Write SYNC file listing for coverage sent */
-  if ( syncfile )
+  if ( syncfile && traces->numtraces > 0 )
     writesync (traces, (time_t)procstart.tv_sec, (time_t)procend.tv_sec);
+  
+  /* Check that all input data was sent */
+  file = filelist;
+  allsent = 1;
+  while ( file )
+    {
+      if ( file->bytecount != file->size )
+	allsent = 0;
+      
+      file = file->next;
+    }
+  
+  if ( allsent )
+    lprintf (0, "All data transmitted.");
   
   /* Print trace coverage sent */
   if ( verbose >= 3 )
@@ -349,10 +410,12 @@ printfilelist (FILE *fp)
   
   while ( file )
     {
-      fprintf (fp, "%s\t%lld\t%lld\n",
+      fprintf (fp, "%s\t%lld\t%lld\t%llu\t%llu\n",
 	       file->name,
 	       (signed long long int) file->offset,
-	       (signed long long int) file->size);
+	       (signed long long int) file->size,
+	       (unsigned long long int) file->bytecount,
+	       (unsigned long long int) file->recordcount);
       
       file = file->next;
     }
@@ -506,6 +569,7 @@ recoverstate (char *statefile)
   
   char filename[MAX_FILENAME_LENGTH];
   signed long long int offset, size;
+  unsigned long long int bytecount, recordcount;
   
   if ( (fp = fopen(statefile, "r")) == NULL )
     {
@@ -521,13 +585,13 @@ recoverstate (char *statefile)
   
   while ( (fgets (line, sizeof(line), fp)) !=  NULL)
     {
-      fields = sscanf (line, "%s %lld %lld\n",
-		       filename, &offset, &size);
+      fields = sscanf (line, "%s %lld %lld %llu %llu\n",
+		       filename, &offset, &size, &bytecount, &recordcount);
       
       if ( fields < 0 )
         continue;
       
-      if ( fields < 3 )
+      if ( fields < 5 )
         {
           lprintf (0, "Could not parse line %d of state file", count);
 	  continue;
@@ -548,6 +612,8 @@ recoverstate (char *statefile)
 	  if ( ! strcmp (filename, file->name) )
 	    {
 	      file->offset = offset;
+	      file->bytecount = bytecount;
+	      file->recordcount = recordcount;
 	      
 	      if ( file->size != size )
 		lprintf (2, "%s: size has changed since last execution (%lld => %lld)",
@@ -602,6 +668,10 @@ processparam (int argcount, char **argvec)
       else if (strcmp (argvec[optind], "-I") == 0)
         {
 	  iostats = 1;
+        }
+      else if (strcmp (argvec[optind], "-It") == 0)
+        {
+	  iostatsint = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
         }
       else if (strcmp (argvec[optind], "-q") == 0)
         {
@@ -1184,11 +1254,12 @@ usage()
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
           " -I             Print IO stats during transmission\n"
+	  " -It interval   Interval in seconds to print IO statistics (default: %d)\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
 	  " -NA            Do not require the server to acknowledge each packet received\n"
 	  " -S file        State file to save/restore connection status\n"
 	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
-          "\n");
+          "\n", iostatsint);
   exit (1);
 }  /* End of usage() */

@@ -29,8 +29,8 @@ extern "C" {
 
 #include "portable.h"
 
-#define LIBDALI_VERSION "1.1"        /**< libdali version */
-#define LIBDALI_RELEASE "2008.256"   /**< libdali release date */
+#define LIBDALI_VERSION "1.2"        /**< libdali version */
+#define LIBDALI_RELEASE "2008.284"   /**< libdali release date */
 
 #define MAXPACKETSIZE       16384    /**< Maximum packet size for libdali */
 #define MAXREGEXSIZE        16384    /**< Maximum regex pattern size */

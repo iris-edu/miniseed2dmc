@@ -1,3 +1,9 @@
+2008.284: 1.2
+	- Change dl_write() to return an error -1 when the server 
+	acknowledgement indicates there was an error.  Also print 
+	the server replies indicating errors at a lower verbosity
+	level than acknowledgements indicating success.
+
 2008.256: 1.1
 	- DataLink protocol addition of packet end time changes, this
 	modified the WRITE command and PACKET response to include
