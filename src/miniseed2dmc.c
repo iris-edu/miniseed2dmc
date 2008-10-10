@@ -21,11 +21,11 @@
 
 - D Write hpSYNC file
 
-- Resume connection on breakage
+- D Resume connection on breakage
+
+- D state file resuming
 
 - IO stats at intervals in addition to file endings
-
-- state file resuming
 
 - return consistent value for all sent or not
 
@@ -82,7 +82,7 @@ static char  maxrecur      = -1;   /* Maximum level of directory recursion */
 static int   iostats       = 0;    /* Output IO stats */
 static int   quiet         = 0;    /* Quiet mode */
 static int   quitonerror   = 0;    /* Quit program on connection errors */
-static int   reconnect     = 60;   /* Reconnect delay if not quittng on errors */
+static int   reconnect     = 60;   /* Reconnect delay if not quitting on errors */
 static int   syncfile      = 1;    /* SYNC file for writing data coverage */
 static char *statefile     = 0;    /* State file for saving/restoring time stamps */
 
@@ -167,11 +167,14 @@ main (int argc, char** argv)
       /* Connect to server */
       if ( dl_connect (dlconn) < 0 )
 	{
-	  lprintf (0, "Error connecting to server\n");
+	  lprintf (0, "Error connecting to server");
 	}
       else
 	{
 	  restart = 0;
+	  
+	  if ( ! quiet )
+	    lprintf (0, "Connected to %s", dlconn->addr);
 	  
 	  while ( file && ! restart && ! stopsig )
 	    {
@@ -239,10 +242,8 @@ main (int argc, char** argv)
 		    }
 		}  /* End of reading records from file */
 	      
-	      totalfiles++;
-	      
-	      /* Print error if not EOF and set shutdown signal */
-	      if ( retcode != MS_ENDOFFILE && ! restart )
+	      /* Print error if not EOF and not set shutdown or restart signal */
+	      if ( retcode != MS_ENDOFFILE && ! stopsig && ! restart )
 		{
 		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
 		  stopsig = 1;
@@ -269,6 +270,11 @@ main (int argc, char** argv)
 			   (iostatsinterval)?(file->bytecount/iostatsinterval):0,
 			   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
 		}
+	      
+	      if ( restart )
+		break;
+	      
+	      totalfiles++;
 	      
 	      if ( ! file->next )  /* If that was the last file set the stop signal */
 		stopsig = 1;
@@ -501,9 +507,11 @@ recoverstate (char *statefile)
   char filename[MAX_FILENAME_LENGTH];
   signed long long int offset, size;
   
-  if ( (fp=fopen(statefile, "r")) == NULL )
+  if ( (fp = fopen(statefile, "r")) == NULL )
     {
-      lprintf (0, "Error opening statefile %s: %s", statefile, strerror(errno));
+      /* Only log errors other than file not found */
+      if ( errno != ENOENT )
+	lprintf (0, "Error opening statefile %s: %s", statefile, strerror(errno));
       return -1;
     }
   
@@ -707,9 +715,9 @@ processparam (int argcount, char **argvec)
   /* Attempt to recover sequence numbers from state file */
   if ( statefile )
     {
-      if ( recoverstate (statefile) < 0 )
+      if ( recoverstate (statefile) == 0 )
         {
-          lprintf (0, "state recovery failed");
+          lprintf (0, "Connection state recovered");
         }
     }
   
@@ -1173,19 +1181,14 @@ usage()
 	  " -V             Report program version\n"
 	  " -h             Show this usage message\n"
 	  " -v             Be more verbose, multiple flags can be used\n"
-	  
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
-	  
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
-	  
           " -I             Print IO stats during transmission\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
 	  " -NA            Do not require the server to acknowledge each packet received\n"
-	  
-	  " -S file        State file to save/restore file time stamps\n"
+	  " -S file        State file to save/restore connection status\n"
 	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
-          "\n"
-	  );
+          "\n");
   exit (1);
 }  /* End of usage() */
