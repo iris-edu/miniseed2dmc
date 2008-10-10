@@ -18,18 +18,12 @@
 - D Input as files
 - D Input as directories, identified gets recursed
 - D Input as @listfile or -l
-
 - D Write hpSYNC file
-
 - D Resume connection on breakage
-
 - D state file resuming
-
 - D IO stats at intervals in addition to file endings
-
 - D skip non-SEED files
-
-- return consistent value for all sent or not
+- D return consistent value for all sent or not
 
 - man page
 
@@ -128,6 +122,7 @@ main (int argc, char** argv)
   double iostatsinterval;
   int restart = 0;
   int allsent = 0;
+  int exitval = 0;
   
   MSRecord *msr = 0;
   char streamid[100];
@@ -190,6 +185,7 @@ main (int argc, char** argv)
 	      lprintf (0, "ERROR Write permission not granted for %s", dlconn->addr);
 	      
 	      stopsig = 1;
+	      exitval = 1;
 	      break;
 	    }
 	  
@@ -294,6 +290,7 @@ main (int argc, char** argv)
 	      else if ( retcode != MS_ENDOFFILE && ! stopsig && ! restart )
 		{
 		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
+		  exitval = 1;
 		  stopsig = 1;
 		}
 	      else
@@ -394,7 +391,7 @@ main (int argc, char** argv)
   /* Free the global file list */
   freelist (&filelist);
   
-  return 0;
+  return exitval;
 }  /* End of main() */
 
 
@@ -689,7 +686,7 @@ processparam (int argcount, char **argvec)
         {
           syncfile = 0;
         }
-      else if (strcmp (argvec[optind], "-NA") == 0)
+      else if (strcmp (argvec[optind], "-NACK") == 0)
         {
           writeack = 0;
         }
@@ -737,9 +734,13 @@ processparam (int argcount, char **argvec)
     }
   
   /* Make sure a server was specified */
-  if ( ! address )
+  if ( ! address || ! statefile )
     {
-      fprintf(stderr, "No data submission server specified\n\n");
+      if ( ! address )
+	fprintf(stderr, "No data submission server specified\n\n");
+      if ( ! statefile )
+	fprintf(stderr, "No state file was specified, the -S argument in required\n\n");
+      
       fprintf(stderr, "%s version: %s\n\n", PACKAGE, VERSION);
       fprintf(stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
       fprintf(stderr, "Try '-h' for detailed help\n");
@@ -1245,7 +1246,7 @@ static void
 usage()
 {
   fprintf(stderr,"%s version %s\n\n", PACKAGE, VERSION);
-  fprintf(stderr,"Send files of Mini-SEED to the IRIS DMC\n\n");
+  fprintf(stderr,"Send Mini-SEED to the IRIS DMC\n\n");
   fprintf(stderr,"Usage: %s [options] [host][:port] files\n\n", PACKAGE);
   fprintf(stderr," ## Options ##\n"
 	  " -V             Report program version\n"
@@ -1257,7 +1258,6 @@ usage()
 	  " -It interval   Interval in seconds to print IO statistics (default: %d)\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
-	  " -NA            Do not require the server to acknowledge each packet received\n"
 	  " -S file        State file to save/restore connection status\n"
 	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
           "\n", iostatsint);
