@@ -25,7 +25,7 @@
 
 - IO stats at intervals in addition to file endings
 
-- state file resuming?  Does not work with ms_readfile(), can't set initial offset
+- state file resuming
 
 - return consistent value for all sent or not
 
@@ -55,7 +55,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.282"
+#define VERSION "2008.283"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -124,7 +124,7 @@ main (int argc, char** argv)
   
   MSRecord *msr = 0;
   char streamid[100];
-  off_t filepos;
+  off_t filepos = 0;
   hptime_t endtime;
   int retcode = MS_ENDOFFILE;
   
@@ -175,16 +175,31 @@ main (int argc, char** argv)
 	  
 	  while ( file && ! restart && ! stopsig )
 	    {
+	      /* Skip file if already sent */
+	      if ( file->offset == file->size )
+		{
+		  if ( ! file->next )   /* If that was the last file set the stop signal */
+		    stopsig = 1;
+		  else		        /* Otherwise increment to the next file in the list */
+		    file = file->next;
+		  
+		  continue;
+		}
+	      
 	      if ( iostats )
 		{
 		  gettimeofday (&filestart, NULL);
 		}
 	      
-	      lprintf (3, "Processing file %s", file->name);
+	      lprintf (3, "Sending Mini-SEED from file %s", file->name);
 	      
 	      /* Reset byte and record counters */
 	      file->bytecount = 0;
 	      file->recordcount = 0;
+	      
+	      /* Set initial file position if this file has been read from */
+	      if ( file->offset > 0 )
+		filepos = file->offset * -1;
 	      
 	      /* Read all data records from file and send to the server */
 	      while ( ! stopsig &&
@@ -255,11 +270,9 @@ main (int argc, char** argv)
 			   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
 		}
 	      
-	      /* If that was the last file set the stop signal */
-	      if ( ! file->next )
+	      if ( ! file->next )  /* If that was the last file set the stop signal */
 		stopsig = 1;
-	      /* Otherwise increment to the next file in the list */
-	      else
+	      else                 /* Otherwise increment to the next file in the list */
 		file = file->next;
 	    } /* End of traversing file list */
 	}
@@ -279,7 +292,7 @@ main (int argc, char** argv)
   /* Set processing end time */
   gettimeofday (&procend, NULL);
   
-  if ( iostats )
+  if ( ! quiet )
     {
       iostatsinterval = ( ((double)procend.tv_sec + (double)procend.tv_usec/1000000) -
 			  ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
@@ -288,8 +301,13 @@ main (int argc, char** argv)
 	       iostatsinterval,
 	       totalbytes/iostatsinterval,
 	       totalrecords/iostatsinterval);
+
+      lprintf (0, "Sent %llu bytes in %llu records from %llu file(s)",
+	       (unsigned long long) totalbytes,
+	       (unsigned long long) totalrecords,
+	       (unsigned long long) totalfiles);
     }
-  
+
   /* Shut down the connection to the server */
   if ( dlconn->link != -1 )
     dl_disconnect (dlconn);
@@ -311,102 +329,6 @@ main (int argc, char** argv)
   
   return 0;
 }  /* End of main() */
-
-
-/***************************************************************************
- * readfile:
- *
- * Read MSRecords from a specified file at a specified offset.  If the
- * specified offset is -1 the next record from the current read
- * position is returned.
- *
- * Return the return vale from ms_readmsr().
- ***************************************************************************/
-int
-ms_readmsr (MSRecord **ppmsr, char *msfile, off_t offset)
-{
-  static MSFileParam *msfp = 0;
-  off_t filepos;
-  int last;
-  
-/* Reading Mini-SEED records from files 
-typedef struct MSFileParam_s
-{
-  FILE *fp;
-  char *rawrec;
-  char  filename[512];
-  int   autodet;
-  int   readlen;
-  int   packtype;
-  off_t packhdroffset;
-  off_t filepos;
-  int   recordcount;
-} MSFileParam;
-*/
-
-  /* Closeout current file if requested */
-  if ( ! msfile )
-    {
-      if ( msfp )
-	{
-	  ms_readmsr_r (&msfp, ppmsr, NULL, -1, NULL, NULL, 1, 0, verbose-2);
-	}
-      
-      msfp = 0;
-      return MS_NOERROR;
-    }
-  
-  /* Read all data records from file and send to the server */
-	      while ( ! stopsig &&
-		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
-		{
-		  /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
-		  msr_srcname (msr, streamid, 0);
-		  strcat (streamid, "/MSEED");
-		  
-		  endtime = msr_endtime (msr);
-		  
-		  lprintf (4, "Sending %s", streamid);
-		  
-		  /* Send record to server */
-		  if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
-		    {
-		      restart = 1;
-		      break;
-		    }
-		  else
-		    {
-		      /* Track read position in input file */
-		      file->offset = filepos + msr->reclen;
-		      
-		      /* Update counts */
-		      file->bytecount += msr->reclen;
-		      file->recordcount++;
-		      
-		      totalbytes += msr->reclen;
-		      totalrecords++;
-		      
-		      /* Add record to trace coverage */
-		      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
-			{
-			  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
-			}
-		    }
-		}  /* End of reading records from file */
-	      
-	      totalfiles++;
-	      
-	      /* Print error if not EOF and set shutdown signal */
-	      if ( retcode != MS_ENDOFFILE && ! restart )
-		{
-		  lprintf (0, "Error reading %s: %s", file->name, ms_errorstr(retcode));
-		  stopsig = 1;
-		}
-	      
-	      /* Make sure everything is cleaned up */
-	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
-
-} /* End of readfile() */
 
 
 /***************************************************************************
