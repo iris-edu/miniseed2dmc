@@ -53,7 +53,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.284"
+#define VERSION "2008.285"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -151,6 +151,26 @@ main (int argc, char** argv)
   if ( processparam (argc, argv) < 0 )
     return 1;
   
+  /* Shortcut: check if all input data has already been sent */
+  file = filelist;
+  allsent = 1;
+  while ( file )
+    {
+      if ( file->bytecount != file->size )
+	allsent = 0;
+      
+      file = file->next;
+    }
+  if ( allsent )
+    {
+      lprintf (0, "All data transmitted (based on saved state).");
+      
+      /* Free the global file list */
+      freelist (&filelist);
+      
+      return 0;
+    }
+  
   /* Configure reconnection sleep time */
   rcsleep.tv_sec = reconnect;
   rcsleep.tv_nsec = 0;
@@ -160,7 +180,7 @@ main (int argc, char** argv)
   
   /* Set processing start time */
   gettimeofday (&procstart, NULL);
-
+  
   iostatsprint.tv_sec = iostatsprint.tv_usec = 0;
   
   /* Start scan sequence */
