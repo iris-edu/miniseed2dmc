@@ -53,7 +53,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.285"
+#define VERSION "2008.290"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -689,6 +689,7 @@ processparam (int argcount, char **argvec)
       else if (strcmp (argvec[optind], "-It") == 0)
         {
 	  iostatsint = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
+	  iostats = 1;
         }
       else if (strcmp (argvec[optind], "-q") == 0)
         {
@@ -706,7 +707,7 @@ processparam (int argcount, char **argvec)
         {
           syncfile = 0;
         }
-      else if (strcmp (argvec[optind], "-NACK") == 0)
+      else if (strcmp (argvec[optind], "-NOACK") == 0)
         {
           writeack = 0;
         }

@@ -1,3 +1,6 @@
+2008.290:
+	- Assume -I if -It is used.
+
 2008.285:
 	- Add check for all data sent before connecting to the server.
 
