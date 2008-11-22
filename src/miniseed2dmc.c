@@ -25,6 +25,14 @@
 - D skip non-SEED files
 - D return consistent value for all sent or not
 
+- define working directory (-w?) where SYNC files are written, default to cwd.
+
+- allow -S statefile option to override the default workdir/statefile.
+
+- turn NOACK into ACK and do not request ACKs by default (too slow).
+
+- fail when statefile does not contain same files as input
+
 - man page
 
 */
