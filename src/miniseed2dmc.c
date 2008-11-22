@@ -25,11 +25,9 @@
 - D skip non-SEED files
 - D return consistent value for all sent or not
 
-- define working directory (-w?) where SYNC files are written, default to cwd.
-
-- allow -S statefile option to override the default workdir/statefile.
-
-- turn NOACK into ACK and do not request ACKs by default (too slow).
+- D turn NOACK into ACK and do not request ACKs by default (too slow).
+- D allow -S statefile option to override the default workdir/statefile.
+- D define working directory (-w?) where SYNC files are written, default to cwd.
 
 - fail when statefile does not contain same files as input
 
@@ -61,7 +59,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.290"
+#define VERSION "2008.327"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -82,7 +80,7 @@ static FileLink *lastfile  = 0;    /* Last entry of input files list */
 
 static char  stopsig       = 0;    /* Stop/termination signal */
 static int   verbose       = 0;    /* Verbosity level */
-static int   writeack      = 1;    /* Flag to control the request for write acks */
+static int   writeack      = 0;    /* Flag to control the request for write acks */
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
 static int   iostats       = 0;    /* Output IO stats */
@@ -91,16 +89,17 @@ static int   quiet         = 0;    /* Quiet mode */
 static int   quitonerror   = 0;    /* Quit program on connection errors */
 static int   reconnect     = 60;   /* Reconnect delay if not quitting on errors */
 static int   syncfile      = 1;    /* SYNC file for writing data coverage */
+static char *workdir       = ".";  /* Directory to write SYNC and state files */
 static char *statefile     = 0;    /* State file for saving/restoring time stamps */
 
 static uint64_t inputbytes = 0;    /* Total size for all input files */
 static uint64_t totalbytes = 0;    /* Track count of total bytes sent */
 static uint64_t totalrecords = 0;  /* Track count of total records sent */
 static uint64_t totalfiles = 0;    /* Track count of total files sent */
-static MSTraceGroup *traces = 0;   /* Track all trace segments sent */
+static MSTraceList *traces = 0;    /* Track all trace segments sent */
 
 static void   printfilelist (FILE *fd);
-static int    writesync (MSTraceGroup *mstg, time_t start, time_t end);
+static int    writesync (MSTraceList *mstl, time_t start, time_t end);
 static int    savestate (char *statefile);
 static int    recoverstate (char *statefile);
 static int    processparam (int argcount, char **argvec);
@@ -184,7 +183,7 @@ main (int argc, char** argv)
   rcsleep.tv_nsec = 0;
   
   /* Initialize trace segment tracking */
-  traces = mst_initgroup (traces);
+  traces = mstl_init (traces);
   
   /* Set processing start time */
   gettimeofday (&procstart, NULL);
@@ -279,7 +278,7 @@ main (int argc, char** argv)
 		      totalrecords++;
 		      
 		      /* Add record to trace coverage */
-		      if ( traces && ! mst_addmsrtogroup (traces, msr, 0, -1.0, -1.0) )
+		      if ( traces && ! mstl_addmsr (traces, msr, 0, 1, -1.0, -1.0) )
 			{
 			  lprintf (0, "Error adding %s coverage to trace tracking", streamid);
 			}
@@ -414,7 +413,7 @@ main (int argc, char** argv)
   
   /* Print trace coverage sent */
   if ( verbose >= 3 )
-    mst_printtracelist (traces, 0, 1, 0);
+    mstl_printtracelist (traces, 0, 1, 0);
   
   /* Free the global file list */
   freelist (&filelist);
@@ -452,14 +451,15 @@ printfilelist (FILE *fp)
 /***************************************************************************
  * writesync:
  *
- * Write trace coverage for the given MSTraceGroup to a SYNC file.
+ * Write trace coverage for the given MSTraceList to a SYNC file.
  *
  * Returns 0 on success and -1 on error.
  ***************************************************************************/
 static int
-writesync (MSTraceGroup *mstg, time_t start, time_t end)
+writesync (MSTraceList *mstl, time_t start, time_t end)
 {
-  MSTrace *mst;
+  MSTraceID *id;
+  MSTraceSeg *seg;
   FILE *sf = 0;
   time_t now;
   struct tm *nt;
@@ -470,10 +470,8 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
   char endtime[50];
   char filename[MAX_FILENAME_LENGTH];
   
-  if ( ! mstg )
+  if ( ! mstl )
     return -1;
-  
-  mst = mstg->traces;
   
   /* Generate current time stamp */
   now = time (NULL);
@@ -484,7 +482,7 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
   st = localtime ( &start ); st->tm_year += 1900; st->tm_mon += 1;
   et = localtime ( &end ); et->tm_year += 1900; et->tm_mon += 1;
   snprintf ( filename, sizeof(filename),
-	     "%04d-%02d-%02dT%02d:%02d:%02d--%04d-%02d-%02dT%02d:%02d:%02d.sync",
+	     "%s/%04d-%02d-%02dT%02d:%02d:%02d--%04d-%02d-%02dT%02d:%02d:%02d.sync", workdir,
 	     st->tm_year, st->tm_mon, st->tm_mday, st->tm_hour, st->tm_min, st->tm_sec,
 	     et->tm_year, et->tm_mon, et->tm_mday, et->tm_hour, et->tm_min, et->tm_sec);
   
@@ -499,17 +497,24 @@ writesync (MSTraceGroup *mstg, time_t start, time_t end)
   fprintf (sf, "DCC|%s\n", yearday);
   
   /* Trace MSTrace list and print SYNC lines */
-  while ( mst )
+  id = mstl->traces;
+  while ( id )
     {
-      ms_hptime2seedtimestr (mst->starttime, starttime, 1);
-      ms_hptime2seedtimestr (mst->endtime, endtime, 1);
+      seg = id->first;
+      while ( seg )
+	{
+	  ms_hptime2seedtimestr (seg->starttime, starttime, 1);
+	  ms_hptime2seedtimestr (seg->endtime, endtime, 1);
+	  
+	  fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d|||||||%s\n",
+		   id->network, id->station, id->location, id->channel,
+		   starttime, endtime, seg->samprate, seg->samplecnt,
+		   yearday);
+	  
+	  seg = seg->next;
+	}
       
-      fprintf (sf, "%s|%s|%s|%s|%s|%s||%.2g|%d|||||||%s\n",
-	       mst->network, mst->station, mst->location, mst->channel,
-	       starttime, endtime, mst->samprate, mst->samplecnt,
-	       yearday);
-      
-      mst = mst->next;
+      id = id->next;
     }
   
   if ( sf )
@@ -582,7 +587,8 @@ savestate (char *statefile)
  *
  * Recover the state information from the state file.
  *
- * Returns 0 on success and -1 on error.
+ * Returns 1 when state recovered, 0 when state file does not exist
+ * and -1 on error.
  ***************************************************************************/
 static int
 recoverstate (char *statefile)
@@ -600,8 +606,12 @@ recoverstate (char *statefile)
     {
       /* Only log errors other than file not found */
       if ( errno != ENOENT )
-	lprintf (0, "Error opening statefile %s: %s", statefile, strerror(errno));
-      return -1;
+	{
+	  lprintf (0, "Error opening statefile %s: %s", statefile, strerror(errno));
+	  return -1;
+	}
+      else
+	return 0;
     }
   
   lprintf (1, "Recovering state");
@@ -622,7 +632,7 @@ recoverstate (char *statefile)
 	  continue;
         }
       
-      /* Find matching enty in input file list */
+      /* Find matching entry in input file list */
       file = filelist;
       while ( file )
 	{
@@ -655,7 +665,7 @@ recoverstate (char *statefile)
   
   fclose (fp);
   
-  return 0;
+  return 1;
 }  /* End of recoverstate() */
 
 
@@ -672,6 +682,7 @@ processparam (int argcount, char **argvec)
   FileLink *listfiles = 0;
   char *address = 0;
   char *tptr;
+  int recovery;
   int optind;
   
   /* Process all command line arguments */
@@ -690,6 +701,26 @@ processparam (int argcount, char **argvec)
         {
           verbose += strspn (&argvec[optind][1], "v");
         }
+      else if (strcmp (argvec[optind], "-r") == 0)
+        {
+          maxrecur = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
+        }
+      else if (strcmp (argvec[optind], "-E") == 0)
+        {
+	  quitonerror = 1;
+        }
+      else if (strcmp (argvec[optind], "-q") == 0)
+        {
+          quiet = 1;
+        }
+      else if (strcmp (argvec[optind], "-NS") == 0)
+        {
+          syncfile = 0;
+        }
+      else if (strcmp (argvec[optind], "-ACK") == 0)
+        {
+          writeack = 1;
+        }
       else if (strcmp (argvec[optind], "-I") == 0)
         {
 	  iostats = 1;
@@ -699,25 +730,9 @@ processparam (int argcount, char **argvec)
 	  iostatsint = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
 	  iostats = 1;
         }
-      else if (strcmp (argvec[optind], "-q") == 0)
+      else if (strcmp (argvec[optind], "-w") == 0)
         {
-          quiet = 1;
-        }
-      else if (strcmp (argvec[optind], "-E") == 0)
-        {
-	  quitonerror = 1;
-        }
-      else if (strcmp (argvec[optind], "-r") == 0)
-        {
-          maxrecur = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
-        }
-      else if (strcmp (argvec[optind], "-NS") == 0)
-        {
-          syncfile = 0;
-        }
-      else if (strcmp (argvec[optind], "-NOACK") == 0)
-        {
-          writeack = 0;
+          workdir = getoptval(argcount, argvec, optind++);
         }
       else if (strcmp (argvec[optind], "-S") == 0)
         {
@@ -762,13 +777,19 @@ processparam (int argcount, char **argvec)
 	}
     }
   
+  /* Check for write access on working directory */
+  if ( access (workdir, W_OK | R_OK) )
+    {
+      fprintf (stderr, "Error with working directory %s: %s\n",
+	       workdir, strerror(errno));
+      exit (1);
+    }
+  
   /* Make sure a server was specified */
-  if ( ! address || ! statefile )
+  if ( ! address )
     {
       if ( ! address )
 	fprintf(stderr, "No data submission server specified\n\n");
-      if ( ! statefile )
-	fprintf(stderr, "No state file was specified, the -S argument in required\n\n");
       
       fprintf(stderr, "%s version: %s\n\n", PACKAGE, VERSION);
       fprintf(stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
@@ -812,13 +833,27 @@ processparam (int argcount, char **argvec)
       exit (1);
     }
   
-  /* Attempt to recover sequence numbers from state file */
-  if ( statefile )
+  /* Setup default state file as "workdir/statefile" */
+  if ( ! statefile )
     {
-      if ( recoverstate (statefile) == 0 )
-        {
-          lprintf (0, "Connection state recovered");
-        }
+      char wdir[256];
+      
+      snprintf (wdir, sizeof(wdir), "%s/statefile", workdir);
+      
+      workdir = strdup(wdir);
+    }
+  
+  /* Attempt to recover sequence numbers from state file */
+  recovery = recoverstate (statefile);
+  
+  if ( recovery == 1 )
+    {
+      lprintf (0, "Connection state recovered");
+    }
+  else if ( recovery == -1 )
+    {
+      lprintf (0, "Error recoverying state file");
+      exit (1);
     }
   
   return 0;
@@ -1283,11 +1318,13 @@ usage()
 	  " -v             Be more verbose, multiple flags can be used\n"
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
-          " -I             Print IO stats during transmission\n"
-	  " -It interval   Interval in seconds to print IO statistics (default: %d)\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
-	  " -S file        State file to save/restore connection status\n"
+	  " -ACK           Require acknowledgements from the server for each record (slow)\n"
+          " -I             Print transfer rate during transmission\n"
+	  " -It interval   Interval in seconds to print transfer statistics (default: %d)\n"
+	  " -w workdir     Location to write SYNC and state files, default is current dir\n"
+	  " -S statefile   File to track transfer status, default is workdir/statefile\n"
 	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
           "\n", iostatsint);
   exit (1);

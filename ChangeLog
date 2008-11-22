@@ -1,3 +1,9 @@
+2008.327:
+	- Add -w option to specify work directory and write SYNC
+	files and state file to the work directory, defaults to cwd.
+	- Change -NOACK and -ACK and do not require acknowledgments
+	from the server by default (due significant slow down).
+
 2008.290:
 	- Assume -I if -It is used.
 
