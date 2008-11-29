@@ -28,8 +28,7 @@
 - D turn NOACK into ACK and do not request ACKs by default (too slow).
 - D allow -S statefile option to override the default workdir/statefile.
 - D define working directory (-w?) where SYNC files are written, default to cwd.
-
-- fail when statefile does not contain same files as input
+- D fail when statefile file names are not found in input list.
 
 - man page
 
@@ -59,7 +58,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.327"
+#define VERSION "2008.333"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -597,6 +596,7 @@ recoverstate (char *statefile)
   char line[MAX_FILENAME_LENGTH+30];
   int fields, count;
   FILE *fp;
+  flag found;
   
   char filename[MAX_FILENAME_LENGTH];
   signed long long int offset, size;
@@ -633,6 +633,7 @@ recoverstate (char *statefile)
         }
       
       /* Find matching entry in input file list */
+      found = 0;
       file = filelist;
       while ( file )
 	{
@@ -654,10 +655,19 @@ recoverstate (char *statefile)
 		lprintf (2, "%s: size has changed since last execution (%lld => %lld)",
 			 (signed long long int) size, (signed long long int) file->size);
 	      
+	      found = 1;
 	      break;
 	    }
 	  
 	  file = file->next;
+	}
+      
+      if ( ! found )
+	{
+	  lprintf (0, "%s: found in state file but not input file list", filename);
+	  lprintf (0, "Wrong state file?");
+	  fclose (fp);
+	  return -1;
 	}
       
       count++;
@@ -785,13 +795,11 @@ processparam (int argcount, char **argvec)
       exit (1);
     }
   
-  /* Make sure a server was specified */
+  /* Require a server to be specified */
   if ( ! address )
     {
-      if ( ! address )
-	fprintf(stderr, "No data submission server specified\n\n");
-      
       fprintf(stderr, "%s version: %s\n\n", PACKAGE, VERSION);
+      fprintf(stderr, "No data submission server specified\n\n");
       fprintf(stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
       fprintf(stderr, "Try '-h' for detailed help\n");
       exit (1);
@@ -836,14 +844,14 @@ processparam (int argcount, char **argvec)
   /* Setup default state file as "workdir/statefile" */
   if ( ! statefile )
     {
-      char wdir[256];
+      char sfile[256];
       
-      snprintf (wdir, sizeof(wdir), "%s/statefile", workdir);
+      snprintf (sfile, sizeof(sfile), "%s/statefile", workdir);
       
-      workdir = strdup(wdir);
+      statefile = strdup(wdir);
     }
   
-  /* Attempt to recover sequence numbers from state file */
+  /* Attempt to recover state */
   recovery = recoverstate (statefile);
   
   if ( recovery == 1 )
@@ -852,7 +860,7 @@ processparam (int argcount, char **argvec)
     }
   else if ( recovery == -1 )
     {
-      lprintf (0, "Error recoverying state file");
+      lprintf (0, "Error recovering state file");
       exit (1);
     }
   

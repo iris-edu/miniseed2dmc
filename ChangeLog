@@ -1,3 +1,6 @@
+2008.333:
+	- Exit if state file contains files that are not in the input list.
+
 2008.327:
 	- Add -w option to specify work directory and write SYNC
 	files and state file to the work directory, defaults to cwd.
