@@ -848,7 +848,7 @@ processparam (int argcount, char **argvec)
       
       snprintf (sfile, sizeof(sfile), "%s/statefile", workdir);
       
-      statefile = strdup(wdir);
+      statefile = strdup(sfile);
     }
   
   /* Attempt to recover state */
