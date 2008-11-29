@@ -664,7 +664,7 @@ recoverstate (char *statefile)
       
       if ( ! found )
 	{
-	  lprintf (0, "%s: found in state file but not input file list", filename);
+	  lprintf (0, "%s: found in state file but not an input file", filename);
 	  lprintf (0, "Wrong state file?");
 	  fclose (fp);
 	  return -1;
@@ -787,21 +787,22 @@ processparam (int argcount, char **argvec)
 	}
     }
   
-  /* Check for write access on working directory */
-  if ( access (workdir, W_OK | R_OK) )
-    {
-      fprintf (stderr, "Error with working directory %s: %s\n",
-	       workdir, strerror(errno));
-      exit (1);
-    }
-  
   /* Require a server to be specified */
   if ( ! address )
     {
-      fprintf(stderr, "%s version: %s\n\n", PACKAGE, VERSION);
-      fprintf(stderr, "No data submission server specified\n\n");
-      fprintf(stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
-      fprintf(stderr, "Try '-h' for detailed help\n");
+      fprintf (stderr, "%s version: %s\n\n", PACKAGE, VERSION);
+      fprintf (stderr, "No data submission server specified\n\n");
+      fprintf (stderr, "Usage: %s [options] [host][:port] file(s)\n", PACKAGE);
+      fprintf (stderr, "Try '-h' for detailed help\n");
+      exit (1);
+    }
+  
+  /* Check for write access on working directory */
+  if ( access (workdir, R_OK | X_OK | W_OK) )
+    {
+      fprintf (stderr, "%s version: %s\n\n", PACKAGE, VERSION);
+      fprintf (stderr, "Error with working directory '%s': %s\n\n",
+	       workdir, strerror(errno));
       exit (1);
     }
   
