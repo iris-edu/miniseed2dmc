@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.333"
+#define VERSION "2008.340"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -61,6 +61,7 @@ static int   verbose       = 0;    /* Verbosity level */
 static int   writeack      = 0;    /* Flag to control the request for write acks */
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
+static char  pretend       = 0;    /* Flag to control pretending mode */
 static int   iostats       = 0;    /* Output IO stats */
 static int   iostatsint    = 30;   /* Output IO stats interval */
 static int   quiet         = 0;    /* Quiet mode */
@@ -174,7 +175,7 @@ main (int argc, char** argv)
       file = filelist;
       
       /* Connect to server */
-      if ( dl_connect (dlconn) < 0 )
+      if ( ! pretend && dl_connect (dlconn) < 0 )
 	{
 	  lprintf (0, "Error connecting to server");
 	}
@@ -182,10 +183,10 @@ main (int argc, char** argv)
 	{
 	  restart = 0;
 	  
-	  if ( ! quiet )
+	  if ( ! quiet && ! pretend )
 	    lprintf (0, "Connected to %s", dlconn->addr);
 	  
-	  if ( ! dlconn->writeperm )
+	  if ( ! dlconn->writeperm && ! pretend )
 	    {
 	      lprintf (0, "ERROR Write permission not granted for %s", dlconn->addr);
 	      
@@ -237,7 +238,8 @@ main (int argc, char** argv)
 		  lprintf (4, "Sending %s", streamid);
 		  
 		  /* Send record to server */
-		  if ( dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
+		  if ( ! pretend &&
+		       dl_write (dlconn, msr->record, msr->reclen, streamid, msr->starttime, endtime, writeack) < 0 )
 		    {
 		      lprintf (0, "Error sending record to %s", dlconn->addr);
 		      restart = 1;
@@ -362,9 +364,9 @@ main (int argc, char** argv)
 	       (unsigned long long) totalrecords,
 	       (unsigned long long) totalfiles);
     }
-
+  
   /* Shut down the connection to the server */
-  if ( dlconn->link != -1 )
+  if ( ! pretend && dlconn->link != -1 )
     dl_disconnect (dlconn);
   
   /* Save the state file */
@@ -689,6 +691,10 @@ processparam (int argcount, char **argvec)
       else if (strncmp (argvec[optind], "-v", 2) == 0)
         {
           verbose += strspn (&argvec[optind][1], "v");
+        }
+      else if (strcmp (argvec[optind], "-p") == 0)
+        {
+          pretend = 1;
         }
       else if (strcmp (argvec[optind], "-r") == 0)
         {
@@ -1304,6 +1310,7 @@ usage()
 	  " -V             Report program version\n"
 	  " -h             Show this usage message\n"
 	  " -v             Be more verbose, multiple flags can be used\n"
+	  " -p             Pretend, process input files as usual but do not transfer to DMC\n"
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"

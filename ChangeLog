@@ -1,3 +1,8 @@
+2008.340:
+	- Add -p (pretend) mode option, in this mode the input files,
+	state file and SYNC files are processed as usual but no
+	connection is made to the submission server.
+
 2008.333:
 	- Exit if state file contains files that are not in the input list.
 

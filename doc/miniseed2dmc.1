@@ -56,6 +56,14 @@ Print the program help/usage and exit.
 Be more verbose.  This flag can be used multiple times ("-v -v" or 
 "-vv") for more verbosity.
 
+.IP "-p"
+Pretend, process input files as usual and write the state file and
+SYNC file but do not connect or send data to the submission server.
+Useful for client side testing, the transfer statistics will not be
+accurate.  After running the program in this mode the state file (and
+probably the SYNC file) created must be removed prior to actually
+transferring the data.
+
 .IP "-r \fIlevel\fP"
 Specify the maximum number of directories to recurse into, default is
 no limits.
