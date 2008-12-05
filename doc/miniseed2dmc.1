@@ -1,9 +1,9 @@
-.TH MINISEED2DMC 1 2008/12/04
+.TH MINISEED2DMC 1 2008/12/05
 .SH NAME
-miniseed2dmc \- Transfer Mini-SEED data to the IRIS Data Managment Center
+miniseed2dmc \- Transfer Mini-SEED data to the IRIS DMC
 .SH SYNOPSIS
 .nf
-miniseed2dmc [options] host:port files|directories
+miniseed2dmc [options] host:port files|directories ...
 
 .fi
 .SH DESCRIPTION
@@ -12,16 +12,37 @@ IRIS Data Managment Center.  Prior to using this program coordination
 with DMC is required and the user must have been assigned a host and
 port indicating where the data should be sent.
 
-This transfer method is not file based, Mini-SEED records are sent
-individually and reassembled at the DMC into files
+Mini-SEED to be transfered can be identified 3 different ways:
+.nf
+1 - files on the command line
+2 - directories on the command line which will be searched
+3 - files containing lists of files and/or directories 
+.fi 
 
-Input files or directories or list files '@'
+If directories are specified on the command line or in list files all
+files they contain are assumed to be input files and all
+sub-directories will be searched (the level of recursion can be
+limited with the \fB-r\fP option).
 
-SYNC file.
+List files are identified by prefixing the file name with '@' on the
+command line or by using the \fB-l\fP option.
 
-state file.
+A state file is maintained by \fBminiseed2dmc\fP to track the progress
+of data transfer.  This tracking means that the client can be shut
+down and then resume the transfer when the client is restarted.  More
+importantly it allows the client to determine when all records from a
+given data set have been transferred preventing them from being
+transferred again erroneously.  By default the state file is written
+to a file named, creatively, 'statefile' in the working directory (see
+the \fB-w\fP option).  The default state file location may be
+overridden using the \fB-S\fP option.
 
-not real-time.
+To track the Mini-SEED data transferred \fBminiseed2dmc\fP writes SYNC
+files representing the data coverage.  The SYNC files are written to
+the working directory (see the \fB-w\fP option).  The SYNC file names
+contain the connection start and end times as a record of when the
+data was sent.  A separate SYNC file listing is written for each time
+the program is executed.
 
 .SH OPTIONS
 
@@ -88,8 +109,71 @@ The required host and port arguments specify the server where the
 Mini-SEED records should be sent.
 
 .SH "EXAMPLES"
+For the below examples the host and port are specified as
+\fBhost:port\fP, in real usage these must be a real host name and
+port.
 
+.IP "Example 1"
+The most simple example is sending a couple of files containing
+Mini-SEED:
 
+.nf
+> miniseed2dmc host:port 080101.mseed 080102.mseed
+.fi
+
+In this case the state file and SYNC files will be written to the
+current directory.
+
+.IP "Example 2"
+If there is a directory called 'data' that contains only files of
+Mini-SEED they can all be sent using:
+
+.nf
+> miniseed2dmc host:port data
+.fi
+
+The program automatically distinguishes between files and directories.
+
+.IP "Example 3"
+A list file named 'mseeds.txt' contains:
+.nf
+---- mseeds.txt
+/data/080101.mseed
+/data/080102.mseed
+----
+.fi
+
+This file can be used with miniseed2dmc using the follow sytax (both
+are equivalent):
+
+.nf
+> miniseed2dmc host:port @mseeds.txt
+> miniseed2dmc host:port -l mseeds.txt
+.fi
+
+.IP "Example 4"
+A recommended organization of data is to have a directory for each
+data set and keep all the Mini-SEED files in a sub-directory.  For
+example, a monthly data set can be kept in /archive/Jan2008/ with all
+the January 2008 Mini-SEED files kept in /archive/Jan2008/data/.
+\fBminiseed2dmc\fP could then we executed in the following manner:
+
+.nf
+> miniseed2dmc host:port -w /archive/Jan2008/ /archive/Jan2008/data/
+.fi
+
+This will result in all the Mini-SEED data in /archive/Jan2008/data/
+being transferred and the related state and SYNC file(s) being written
+to /archive/Jan2008/.
+
+.SH "NOTES"
+This transfer method is not file based, Mini-SEED records are sent
+individually and reassembled at the DMC into files useful for the DMC
+archiving process.  The DMC will have no information regarding the
+file names, sizes, etc. from which the records were transferred.
+
+This program is intended to transfer static data sets, it is not
+designed for transfer of real-time streaming data.
 
 .SH AUTHOR
 .nf

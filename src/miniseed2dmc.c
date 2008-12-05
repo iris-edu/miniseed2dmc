@@ -13,27 +13,6 @@
  * Chad Trabant, IRIS Data Management Center
  ***************************************************************************/
 
-/* ToDo:
-
-- D Input as files
-- D Input as directories, identified gets recursed
-- D Input as @listfile or -l
-- D Write hpSYNC file
-- D Resume connection on breakage
-- D state file resuming
-- D IO stats at intervals in addition to file endings
-- D skip non-SEED files
-- D return consistent value for all sent or not
-
-- D turn NOACK into ACK and do not request ACKs by default (too slow).
-- D allow -S statefile option to override the default workdir/statefile.
-- D define working directory (-w?) where SYNC files are written, default to cwd.
-- D fail when statefile file names are not found in input list.
-
-- man page
-
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
