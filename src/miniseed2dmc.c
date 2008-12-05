@@ -801,6 +801,9 @@ processparam (int argcount, char **argvec)
   /* Report the program version */
   if ( ! quiet )
     lprintf (0, "%s version: %s", PACKAGE, VERSION);
+
+  if ( pretend )
+    lprintf (0, "Pretend mode");
   
   /* Process any list files and free the list of lists */
   if ( listfiles )
