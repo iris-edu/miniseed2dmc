@@ -1,18 +1,27 @@
-.TH MSEEDSCAN2DALI 1 2008/01/17
+.TH MINISEED2DMC 1 2008/12/04
 .SH NAME
-mseedscan2dali \- Scan Mini-SEED files and send to DataLink server
+miniseed2dmc \- Transfer Mini-SEED data to the IRIS Data Managment Center
 .SH SYNOPSIS
 .nf
-mseedscan2dali [options] [-d dir] ... ORB
+miniseed2dmc [options] host:port files|directories
 
 .fi
 .SH DESCRIPTION
-\fBmseedscan2dali\fP recursively scans directories and sends any
-Mini-SEED data records it finds to a DataLink server.  During each
-pass of the directory tree new files are discovered and previously
-seen files are checked for appended records.
+\fBminiseed2dmc\fP transfers selected Mini-SEED data records to the
+IRIS Data Managment Center.  Prior to using this program coordination
+with DMC is required and the user must have been assigned a host and
+port indicating where the data should be sent.
 
-See the \fBNOTES\fP section for more details.
+This transfer method is not file based, Mini-SEED records are sent
+individually and reassembled at the DMC into files
+
+Input files or directories or list files '@'
+
+SYNC file.
+
+state file.
+
+not real-time.
 
 .SH OPTIONS
 
@@ -26,127 +35,61 @@ Print the program help/usage and exit.
 Be more verbose.  This flag can be used multiple times ("-v -v" or 
 "-vv") for more verbosity.
 
-.IP "-n"
-During the initial scan of files do not send data to the ORB from
-files not found in the state file.  In other words, skip the data
-records in any newly discovered file during the initial scan.  This is
-useful for getting the scanning back up to the current state of the
-files quickly.  As this option has the potential to skip data it
-should be used with caution.
-
-.IP "-z"
-During the initial scan of files do not send data to the ORB from any
-files if a state file is specified but not found.  In other words,
-skip all data records discovered during the initial scan.  This is
-useful for getting the scanning back up to the current state of the
-files quickly.  As this option has the potential to skip data it
-should be used with caution.
-
-.IP "-1"
-Quit after the first scan of all target directories.
-
-.IP "-L \fIscans\fR"
-Print I/O statistics after the specified number of \fIscans\fR.
-Essentially this is a count of the number of files processed, records
-read from the files and written to the ORB.
-
-.IP "-BL \fIdays\fR"
-Skip files with a BUD file name scheme where the file name indicates
-that the data is more then \fIdays\R old.  When reading BUD-style files
-this saves stat() calls on many files that are older than desired, thus
-reducing overall system I/O.
-
-.IP "-s \fIsecs\fR"
-Specify interval to sleep in-between scans in seconds, default is none.
-
-.IP "-sz \fIsecs\fR"
-Specify interval to sleep in-between scans (in seconds) when no
-records were read during the previous scan, default is none.
-
-.IP "-i \fIdelay\fR"
-Check idle files every 'delay' intervals, default is 60 intervals.
-See \fBNOTES\fP section for a description of idle files.
-
-.IP "-I \fIsecs\fR"
-Treat a file as idle when it has not been modified for this many
-seconds, default is 7200 seconds.  See \fBNOTES\fP section for more a
-description of idle files.
-
-.IP "-Q \fIsecs\fR"
-Treat a file as quiet when it has not been modified for this many
-seconds, default is to never consider files quiet.  Warning, quiet
-files will never be checked again.  See \fBNOTES\fP section for a
-description of quiet files.
-
-.IP "-T \fInsecs\fR"
-Specify the number of nanoseconds to sleep after sending each
-Mini-SEED record to the ORB, default is 100 nanoseconds.
-
-.IP "-f \fImax\fR"
-Specify the maximum number of records to read from a give file during
-a scan, default is 100 records, 0 to disable.  This limit keeps the
-program from dumping the entire contents of a file with many new
-records into the ORB at once.  This option will not cause any records
-to be skipped.
-
-.IP "-r \fIlevel\fR"
+.IP "-r \fIlevel\fP"
 Specify the maximum number of directories to recurse into, default is
-3 levels.
+no limits.
 
-.IP "-M \fImatch\fR"
-Specify a regular expression that must match any given file name for
-it to be processed.  File names are relative to the base directory
-under which they are found.  By default all files found are processed.
+.IP "-E"
+Exit the program on connection errors.  By default miniseed2dmc will
+continuously try to connect to the specified server until all data has
+been sent.
 
-.IP "-R \fIreject\fR"
-Specify a regular expression that must \fInot\fP match any given file
-name for it to be processed.  File names are relative to the base
-directory under which they are found.  By default all files found are
-processed.
+.IP "-q"
+Be quiet, do not print the default diagnostic messages or transmission
+summary.
 
-.IP "-S \fIstatefile[:int]\fR"
-If a \fIstatefile\fR is specified, the state of the program will be
-saved during an orderly shutdown.  On startup, the program will
-attempt to read the specified \fIstatefile\fR allowing it to start
-scanning files where it left off.  Intermediate state saves can be
-controlled with the \fI:int\fR value which specifies the interval in
-seconds at which to save the state information, default interval is
-300 seconds.
+.IP "-NS"
+Do not write a SYNC file after sending data, by default a SYNC file
+representing the data set sent is written for each session.  All SYNC
+files are written to the "work directory" (the \fB-w\fP option).
 
-.IP "\fIringserver\fR"
-A required argument.  Specifies the location of the DataLink
-ringserver in [host]:[port] format.  If 'host' is omitted 'localhost'
-is assumed, if 'port' is omitted port 16000 is assumed.
+.IP "-ACK"
+Request and require acknowledgements from the server for each
+Mini-SEED record sent.  This should not be necessary since TCP
+performs this function, it will also significantly slow down the
+transfer rate.
 
-.SH "NOTES"
-This program is inteded to be run continuously on data files which
-might be growing (i.e. data records are being appended).  The program
-will not perform any kind of sorting, data records are forwarded as
-the files they are contained in are discovered.  In order to feed data
-in time-order to the ringserver the program must discover the files in
-the proper order.  In a real-time collection system writing Mini-SEED
-files as the data is collected this characteristic is a natural
-coincidence.
+.IP "-I"
+Print the transfer rate at a specified interval (the \fB-It\fP option)
+during transmission.
 
-The file scanning logic employs the concept of active, idle and quiet
-files.  Files that have not been modified for specified amounts of
-time are considered idle or quiet.  The idle files will not be checked
-on every scan, instead a specified number of scans will be skipped for
-each idle file.  The quiet files will never be checked ever again.
+.IP "-It \fIinterval\fP"
+Specify \fIinterval\fP in seconds at which to print transfer rate
+statistics during transmission, default is 30 seconds.  This option
+implies the \fB-I\fP option.
 
-Any files discovered that did not contain any Mini-SEED records are
-logged and the file is ignored during any subsequent scans.
+.IP "-w \fIworkdir\fP"
+The working directory is where the state file and SYNC listing will be
+written, default is the current working directory.  A recommended 
 
-Broken symbolic links are quietly skipped.  If they are eventually
-re-connected to something the something will be scanned as expected.
+.IP "-S \fIstatefile\fP"
+A state file is written to track the status of the transmission, a
+uniqe state file should be used for each separate data set.  By
+default a file named "statefile" will be written to the \fBworkdir\fP.
 
-The directory separator is assumed to be '/'.
+.IP "-l \fIlistfile\fP"
+The \fIlistfile\fP is a file containing a list of files and/or
+directories containing Mini-SEED to be sent.  This is an alternative
+to prefixing an input file with the '@' which identifies it as a list
+file.
 
-Currently, this program will only work with 512-byte Mini-SEED
-records.
+.IP "\fIhost:port\fP"
+The required host and port arguments specify the server where the
+Mini-SEED records should be sent.
 
-Upon receiving a SIGUSR1 signal the program will print the current
-file list to standard error.
+.SH "EXAMPLES"
+
+
 
 .SH AUTHOR
 .nf
