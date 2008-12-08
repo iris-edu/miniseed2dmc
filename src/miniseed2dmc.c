@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.340"
+#define VERSION "2008.343"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -1308,7 +1308,7 @@ usage()
 {
   fprintf(stderr,"%s version %s\n\n", PACKAGE, VERSION);
   fprintf(stderr,"Send Mini-SEED to the IRIS DMC\n\n");
-  fprintf(stderr,"Usage: %s [options] [host][:port] files\n\n", PACKAGE);
+  fprintf(stderr,"Usage: %s [options] <host:port> files|directories\n\n", PACKAGE);
   fprintf(stderr," ## Options ##\n"
 	  " -V             Report program version\n"
 	  " -h             Show this usage message\n"
@@ -1323,7 +1323,7 @@ usage()
 	  " -It interval   Interval in seconds to print transfer statistics (default: %d)\n"
 	  " -w workdir     Location to write SYNC and state files, default is current dir\n"
 	  " -S statefile   File to track transfer status, default is workdir/statefile\n"
-	  " -l listfile    File containing list of input files, alternative to '@' prefix\n"
+	  " -l listfile    File containing a list of input files and/or directories\n"
           "\n", iostatsint);
   exit (1);
 }  /* End of usage() */
