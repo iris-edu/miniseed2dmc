@@ -1,3 +1,7 @@
+2008.344:
+	- Fix log printing bug in recoverstate() when file sizes changed.
+	- Update/clarify usage message.
+
 2008.340:
 	- Add -p (pretend) mode option, in this mode the input files,
 	state file and SYNC files are processed as usual but no

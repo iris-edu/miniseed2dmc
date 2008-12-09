@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.343"
+#define VERSION "2008.344"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -634,7 +634,7 @@ recoverstate (char *statefile)
 	      
 	      if ( file->size != size )
 		lprintf (2, "%s: size has changed since last execution (%lld => %lld)",
-			 (signed long long int) size, (signed long long int) file->size);
+			 filename, (signed long long int) size, (signed long long int) file->size);
 	      
 	      found = 1;
 	      break;
