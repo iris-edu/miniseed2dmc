@@ -1107,7 +1107,7 @@ adddir (char *targetdir, char *basedir, int level)
       /* If directory recurse up to the limit */
       if ( S_ISDIR(st.st_mode) )
 	{
-	  if ( dlevel < level )
+	  if ( level < 0 || dlevel < level )
 	    {
 	      lprintf (4, "Recursing into %s", filename);
 	      
