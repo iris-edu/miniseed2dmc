@@ -1,3 +1,8 @@
+2010.019:
+	- Add -fn option to control addition of the local filename into the
+	stream ID sent to the server, a downstream client may use this to
+	write the data record into a similarly name file.
+
 2008.344:
 	- Fix log printing bug in recoverstate() when file sizes changed.
 	- Update/clarify usage message.

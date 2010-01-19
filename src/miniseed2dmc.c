@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2008.344"
+#define VERSION "2010.019"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -61,6 +61,7 @@ static int   verbose       = 0;    /* Verbosity level */
 static int   writeack      = 0;    /* Flag to control the request for write acks */
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
+static int   filenames     = 0;    /* Include file names in streamIDs */
 static char  pretend       = 0;    /* Flag to control pretending mode */
 static int   iostats       = 0;    /* Output IO stats */
 static int   iostatsint    = 30;   /* Output IO stats interval */
@@ -109,9 +110,11 @@ main (int argc, char** argv)
   int restart = 0;
   int allsent = 0;
   int exitval = 0;
+  int streamlen;
   
   MSRecord *msr = 0;
-  char streamid[100];
+  char srcname[50];
+  char streamid[200];
   off_t filepos = 0;
   hptime_t endtime;
   int retcode = MS_ENDOFFILE;
@@ -229,9 +232,23 @@ main (int argc, char** argv)
 	      while ( ! stopsig &&
 		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
 		{
-		  /* Generate stream ID for this record: NET_STA_LOC_CHAN/MSEED */
-		  msr_srcname (msr, streamid, 0);
-		  strcat (streamid, "/MSEED");
+		  /* Generate stream ID for this record: [filename::]NET_STA_LOC_CHAN/MSEED */
+		  msr_srcname (msr, srcname, 0);
+		  
+		  if ( filenames )
+		    streamlen = snprintf (streamid, sizeof(streamid), "%s::%s/MSEED", file->name, srcname);
+		  else
+		    streamlen = snprintf (streamid, sizeof(streamid), "%s/MSEED", srcname);
+		  
+		  /* Check for stream ID truncation */
+		  if ( streamlen >= sizeof(streamid) )
+		    {
+		      lprintf (0, "ERROR Resulting stream ID is too long: '%s::%s/MSEED'", file->name, srcname);
+		      
+		      stopsig = 1;
+		      exitval = 1;
+		      break;
+		    }
 		  
 		  endtime = msr_endtime (msr);
 		  
@@ -699,6 +716,10 @@ processparam (int argcount, char **argvec)
       else if (strcmp (argvec[optind], "-r") == 0)
         {
           maxrecur = strtol (getoptval(argcount, argvec, optind++), NULL, 10);
+        }
+      else if (strcmp (argvec[optind], "-fn") == 0)
+        {
+	  filenames = 1;
         }
       else if (strcmp (argvec[optind], "-E") == 0)
         {
