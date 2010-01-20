@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2010.019"
+#define VERSION "2010.020"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -114,7 +114,7 @@ main (int argc, char** argv)
   
   MSRecord *msr = 0;
   char srcname[50];
-  char streamid[200];
+  char streamid[100];
   off_t filepos = 0;
   hptime_t endtime;
   int retcode = MS_ENDOFFILE;
@@ -1336,6 +1336,7 @@ usage()
 	  " -v             Be more verbose, multiple flags can be used\n"
 	  " -p             Pretend, process input files as usual but do not transfer to DMC\n"
 	  " -r level       Maximum directory levels to recurse, default is no limit\n"
+	  " -fn            Embed relative path and filename in data stream IDs\n"
 	  " -E             Quit on connection errors, by default the client will reconnect\n"
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"

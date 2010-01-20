@@ -1,4 +1,4 @@
-2010.019:
+2010.020:
 	- Add -fn option to control addition of the local filename into the
 	stream ID sent to the server, a downstream client may use this to
 	write the data record into a similarly name file.
