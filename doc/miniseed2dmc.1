@@ -1,16 +1,16 @@
-.TH MINISEED2DMC 1 2008/12/05
+.TH MINISEED2DMC 1 2010/02/09
 .SH NAME
-miniseed2dmc \- Transfer Mini-SEED data to the IRIS DMC
+miniseed2dmc \- Transfer Mini-SEED data to a DMC
 .SH SYNOPSIS
 .nf
 miniseed2dmc [options] host:port files|directories ...
 
 .fi
 .SH DESCRIPTION
-\fBminiseed2dmc\fP transfers selected Mini-SEED data records to the
-IRIS Data Managment Center.  Prior to using this program coordination
-with DMC is required and the user must have been assigned a host and
-port indicating where the data should be sent.
+\fBminiseed2dmc\fP transfers selected Mini-SEED data records from the
+local computer to a remote Data Managment Center.  Prior to using this
+program coordination with DMC is required and the user must have been
+assigned a host and port indicating where the data should be sent.
 
 Mini-SEED to be transfered can be identified 3 different ways:
 .nf
@@ -68,6 +68,11 @@ transferring the data.
 Specify the maximum number of directories to recurse into, default is
 no limits.
 
+.IP "-fn"
+Embed a relative path and filename in the data stream packets sent to
+the server, this information can be used by the remote server to
+re-create the local file names and organization.
+
 .IP "-E"
 Exit the program on connection errors.  By default miniseed2dmc will
 continuously try to connect to the specified server until all data has
@@ -84,9 +89,12 @@ files are written to the "work directory" (the \fB-w\fP option).
 
 .IP "-ACK"
 Request and require acknowledgements from the server for each
-Mini-SEED record sent.  This should not be necessary since TCP
-performs this function, it will also significantly slow down the
-transfer rate.
+Mini-SEED record sent, this guarantees that each record sent was
+written to the filesystem by the remote server.  This should not be
+necessary since TCP performs this function for the network layer,
+leaving only a very small potential that a server crash will lose data
+sent by the client.  It will also significantly slow down the transfer
+rate.
 
 .IP "-I"
 Print the transfer rate at a specified interval (the \fB-It\fP option)
@@ -175,11 +183,6 @@ being transferred and the related state and SYNC file(s) being written
 to /archive/Jan2008/.
 
 .SH "NOTES"
-This transfer method is not file based, Mini-SEED records are sent
-individually and reassembled at the DMC into files useful for the DMC
-archiving process.  The DMC will have no information regarding the
-file names, sizes, etc. from which the records were transferred.
-
 This program is intended to transfer static data sets, it is not
 designed for transfer of real-time streaming data.
 
