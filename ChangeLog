@@ -1,3 +1,8 @@
+2010.127:
+	- Update libmseed to 2.5.1.
+	- Add -s option to specify a data selection file used to limit the
+	data transmitted.
+
 2010.020:
 	- Add -fn option to control addition of the local filename into the
 	stream ID sent to the server, a downstream client may use this to

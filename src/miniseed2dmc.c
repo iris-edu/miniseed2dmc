@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2010.020"
+#define VERSION "2010.127"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -55,6 +55,7 @@ typedef struct FileLink_s {
 
 static FileLink *filelist  = 0;    /* Linked list of input files */
 static FileLink *lastfile  = 0;    /* Last entry of input files list */
+static Selections *selections = 0; /* List of data selections */
 
 static char  stopsig       = 0;    /* Stop/termination signal */
 static int   verbose       = 0;    /* Verbosity level */
@@ -99,6 +100,7 @@ static DLCP *dlconn;
 int
 main (int argc, char** argv)
 {
+  MSFileParam *msfp = 0;
   FileLink *file;
   struct timeval procstart;
   struct timeval procend;
@@ -230,7 +232,8 @@ main (int argc, char** argv)
 	      
 	      /* Read all data records from file and send to the server */
 	      while ( ! stopsig &&
-		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2)) == MS_NOERROR )
+		      (retcode = ms_readmsr_main (&msfp, &msr, file->name, -1, &filepos, NULL, 1, 0, selections, verbose-2))
+		      == MS_NOERROR )
 		{
 		  /* Generate stream ID for this record: [filename::]NET_STA_LOC_CHAN/MSEED */
 		  msr_srcname (msr, srcname, 0);
@@ -303,7 +306,7 @@ main (int argc, char** argv)
 		}  /* End of reading records from file */
 	      
 	      /* Make sure everything is cleaned up */
-	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
+	      ms_readmsr_main (&msfp, &msr, NULL, 0, NULL, NULL, 0, 0, NULL, 0);
 	      
 	      /* Print error if not EOF and not set shutdown or restart signal */
 	      if ( retcode == MS_NOTSEED && file->bytecount == 0 )
@@ -688,6 +691,7 @@ static int
 processparam (int argcount, char **argvec)
 {
   FileLink *listfiles = 0;
+  char *selectfile = 0;
   char *address = 0;
   char *tptr;
   int recovery;
@@ -758,6 +762,10 @@ processparam (int argcount, char **argvec)
         {
 	  addfile (&listfiles, getoptval(argcount, argvec, optind++), NULL);
 	}
+      else if (strcmp (argvec[optind], "-s") == 0)
+        {
+          selectfile = getoptval(argcount, argvec, optind++);
+        }
       else if (strncmp (argvec[optind], "-", 1) == 0)
         {
           lprintf (0, "Unknown option: %s", argvec[optind]);
@@ -842,6 +850,16 @@ processparam (int argcount, char **argvec)
 	}
       
       freelist ( &listfile );
+    }
+  
+  /* Read data selection file */
+  if ( selectfile )
+    {
+      if ( ms_readselectionsfile (&selections, selectfile) < 0 )
+        {
+          lprintf (0, "Cannot read data selection file\n");
+          exit (1);
+        }
     }
   
   /* Make sure input files/dirs specified */
@@ -1346,6 +1364,7 @@ usage()
 	  " -w workdir     Location to write SYNC and state files, default is current dir\n"
 	  " -S statefile   File to track transfer status, default is workdir/statefile\n"
 	  " -l listfile    File containing a list of input files and/or directories\n"
+	  " -s file        Specify a file containing data selection criteria\n"
           "\n", iostatsint);
   exit (1);
 }  /* End of usage() */

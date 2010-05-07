@@ -1,10 +1,10 @@
-.TH MINISEED2DMC 1 2010/02/09
+.TH MINISEED2DMC 1 2010/05/07
 .SH NAME
 miniseed2dmc \- Transfer Mini-SEED data to a DMC
 .SH SYNOPSIS
 .nf
 miniseed2dmc [options] host:port files|directories ...
-
+q
 .fi
 .SH DESCRIPTION
 \fBminiseed2dmc\fP transfers selected Mini-SEED data records from the
@@ -120,9 +120,36 @@ directories containing Mini-SEED to be sent.  This is an alternative
 to prefixing an input file with the '@' which identifies it as a list
 file.
 
+.IP "-s \fIselectfile\fP"
+Limit processing to Mini-SEED records that match a selection in the
+specified file.  The selection file contains parameters to match the
+network, station, location, channel, quality and time range for input
+records.  As a special case, specifying "-" will result in selection
+lines being read from stdin.  For more details see the \fBSELECTION
+FILE\fR section below.
+
 .IP "\fIhost:port\fP"
 The required host and port arguments specify the server where the
 Mini-SEED records should be sent.
+
+.SH "SELECTION FILE"
+A selection file is used to match input data records based on network,
+station, location and channel information.  Optionally a quality and
+time range may also be specified for more refined selection.  The
+non-time fields may use the '*' wildcard to match multiple characters
+and the '?' wildcard to match single characters.  Character sets may
+also be used, for example '[ENZ]' will match either E, N or Z.  After
+a '#' character is read the remaining portion of the line will be
+ignored.
+
+Example selection file entires (the first four fields are required)
+.nf
+#net sta  loc  chan  qual  start             end
+IU   ANMO *    BH?
+II   *    *    *     Q     
+IU   COLA 00   LH[ENZ] R
+IU   COLA 00   LHZ   *     2008,100,10,00,00 2008,100,10,30,00
+.fi
 
 .SH "EXAMPLES"
 For the below examples the host and port are specified as
