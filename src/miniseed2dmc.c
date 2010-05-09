@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2010.127"
+#define VERSION "2010.129"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -100,8 +100,9 @@ static DLCP *dlconn;
 int
 main (int argc, char** argv)
 {
-  MSFileParam *msfp = 0;
   FileLink *file;
+  Selections *matchsp = 0;
+  SelectTime *matchstp = 0;
   struct timeval procstart;
   struct timeval procend;
   struct timeval filestart;
@@ -116,6 +117,7 @@ main (int argc, char** argv)
   
   MSRecord *msr = 0;
   char srcname[50];
+  char qsrcname[50];
   char streamid[100];
   off_t filepos = 0;
   hptime_t endtime;
@@ -232,16 +234,35 @@ main (int argc, char** argv)
 	      
 	      /* Read all data records from file and send to the server */
 	      while ( ! stopsig &&
-		      (retcode = ms_readmsr_main (&msfp, &msr, file->name, -1, &filepos, NULL, 1, 0, selections, verbose-2))
+		      (retcode = ms_readmsr (&msr, file->name, -1, &filepos, NULL, 1, 0, verbose-2))
 		      == MS_NOERROR )
 		{
-		  /* Generate stream ID for this record: [filename::]NET_STA_LOC_CHAN/MSEED */
 		  msr_srcname (msr, srcname, 0);
-		  
-		  if ( filenames )
-		    streamlen = snprintf (streamid, sizeof(streamid), "%s::%s/MSEED", file->name, srcname);
-		  else
-		    streamlen = snprintf (streamid, sizeof(streamid), "%s/MSEED", srcname);
+                  endtime = msr_endtime (msr);
+
+                  /* Check if record is matched by selection */
+                  if ( selections )
+                    {
+                      msr_srcname (msr, qsrcname, 1);
+
+                      if ( ! (matchsp = ms_matchselect (selections, qsrcname, msr->starttime, endtime, &matchstp)) )
+                        {
+                          if ( verbose >= 3 )
+                            {
+                              char stime[30];
+                              ms_hptime2seedtimestr (msr->starttime, stime, 1);
+                              ms_log (1, "Skipping (selection) %s, %s\n", qsrcname, stime);
+                            }
+                          continue;
+                        }
+                    }
+
+                  /* Generate stream ID for this record: [filename::]NET_STA_LOC_CHAN/MSEED */
+                  if ( filenames )
+                    streamlen = snprintf (streamid, sizeof(streamid), "%s::%s/MSEED", file->name, srcname);
+                  else
+                    streamlen = snprintf (streamid, sizeof(streamid), "%s/MSEED", srcname);
+
 		  
 		  /* Check for stream ID truncation */
 		  if ( streamlen >= sizeof(streamid) )
@@ -252,8 +273,6 @@ main (int argc, char** argv)
 		      exitval = 1;
 		      break;
 		    }
-		  
-		  endtime = msr_endtime (msr);
 		  
 		  lprintf (4, "Sending %s", streamid);
 		  
@@ -306,7 +325,7 @@ main (int argc, char** argv)
 		}  /* End of reading records from file */
 	      
 	      /* Make sure everything is cleaned up */
-	      ms_readmsr_main (&msfp, &msr, NULL, 0, NULL, NULL, 0, 0, NULL, 0);
+	      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
 	      
 	      /* Print error if not EOF and not set shutdown or restart signal */
 	      if ( retcode == MS_NOTSEED && file->bytecount == 0 )
@@ -840,6 +859,8 @@ processparam (int argcount, char **argvec)
       FileLink *listfile = listfiles;
       while ( listfile )
 	{
+          lprintf (1, "Reading list file: %s", listfile->name);
+
 	  if ( addlistfile ( listfile->name ) < 0 )
 	    {
 	      lprintf (0, "Error processing list file %s", listfile);
@@ -855,6 +876,8 @@ processparam (int argcount, char **argvec)
   /* Read data selection file */
   if ( selectfile )
     {
+      lprintf (1, "Reading selections file: %s", selectfile);
+
       if ( ms_readselectionsfile (&selections, selectfile) < 0 )
         {
           lprintf (0, "Cannot read data selection file\n");

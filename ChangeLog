@@ -1,4 +1,4 @@
-2010.127:
+2010.129:
 	- Update libmseed to 2.5.1.
 	- Add -s option to specify a data selection file used to limit the
 	data transmitted.
