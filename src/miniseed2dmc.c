@@ -1,10 +1,10 @@
 /***************************************************************************
  * miniseed2dmc.c
  *
- * A program to send specified files of Mini-SEED records to the IRIS
- * DMC.  A record of the data sent is maintained internally and by
- * using the state file option allows for incomplete data transfers to
- * be resumed between program restarts.
+ * A program to send specified files of Mini-SEED records to the a
+ * data management center.  A record of the data sent is maintained
+ * internally and by using the state file option allows for incomplete
+ * data transfers to be resumed between program restarts.
  *
  * A summary of the data sent is printed when the program quits.
  *
@@ -37,7 +37,7 @@
 #include "edir.h"
 
 #define PACKAGE "miniseed2dmc"
-#define VERSION "2010.129"
+#define VERSION "2011.080"
 
 /* Maximum filename length including path */
 #define MAX_FILENAME_LENGTH 512
@@ -60,6 +60,7 @@ static Selections *selections = 0; /* List of data selections */
 static char  stopsig       = 0;    /* Stop/termination signal */
 static int   verbose       = 0;    /* Verbosity level */
 static int   writeack      = 0;    /* Flag to control the request for write acks */
+static int64_t maxrate     = 0;    /* Max rate in bits/sec, 0 to disable  */
 
 static char  maxrecur      = -1;   /* Maximum level of directory recursion */
 static int   filenames     = 0;    /* Include file names in streamIDs */
@@ -79,21 +80,23 @@ static uint64_t totalrecords = 0;  /* Track count of total records sent */
 static uint64_t totalfiles = 0;    /* Track count of total files sent */
 static MSTraceList *traces = 0;    /* Track all trace segments sent */
 
-static void   printfilelist (FILE *fd);
-static int    writesync (MSTraceList *mstl, time_t start, time_t end);
-static int    savestate (char *statefile);
-static int    recoverstate (char *statefile);
-static int    processparam (int argcount, char **argvec);
-static char  *getoptval (int argcount, char **argvec, int argopt);
-static int    addfile (FileLink **list, char *filename, struct stat *stp);
-static int    adddir (char *targetdir, char *basedir, int level);
-static int    addlistfile (char *filename);
-static int    freelist (FileLink **list);
-static void   term_handler();
-static void   print_handler();
-static void   lprintf0 (char *message);
-static int    lprintf (int level, const char *fmt, ...);
-static void   usage ();
+static void    printfilelist (FILE *fd);
+static int     writesync (MSTraceList *mstl, time_t start, time_t end);
+static int     savestate (char *statefile);
+static int     recoverstate (char *statefile);
+static int     processparam (int argcount, char **argvec);
+static char   *getoptval (int argcount, char **argvec, int argopt);
+static int64_t calcbitsize (char *sizestr);
+static int     makeratestr (char *ratestr, int ratestrlen, uint64_t bps);
+static int     addfile (FileLink **list, char *filename, struct stat *stp);
+static int     adddir (char *targetdir, char *basedir, int level);
+static int     addlistfile (char *filename);
+static int     freelist (FileLink **list);
+static void    term_handler();
+static void    print_handler();
+static void    lprintf0 (char *message);
+static int     lprintf (int level, const char *fmt, ...);
+static void    usage ();
 
 static DLCP *dlconn;
 
@@ -106,14 +109,16 @@ main (int argc, char** argv)
   struct timeval procstart;
   struct timeval procend;
   struct timeval filestart;
+  struct timeval lastpkt;
   struct timeval iostatsprint;
   struct timeval now;
   struct timespec rcsleep;
-  double iostatsinterval;
+  double interval;
   int restart = 0;
   int allsent = 0;
   int exitval = 0;
   int streamlen;
+  char ratestr[50];
   
   MSRecord *msr = 0;
   char srcname[50];
@@ -170,6 +175,10 @@ main (int argc, char** argv)
   
   /* Initialize trace segment tracking */
   traces = mstl_init (traces);
+  
+  /* Initilize transmission rate timer */
+  if ( maxrate ) 
+    gettimeofday (&lastpkt, NULL);
   
   /* Set processing start time */
   gettimeofday (&procstart, NULL);
@@ -262,7 +271,6 @@ main (int argc, char** argv)
                     streamlen = snprintf (streamid, sizeof(streamid), "%s::%s/MSEED", file->name, srcname);
                   else
                     streamlen = snprintf (streamid, sizeof(streamid), "%s/MSEED", srcname);
-
 		  
 		  /* Check for stream ID truncation */
 		  if ( streamlen >= sizeof(streamid) )
@@ -272,6 +280,37 @@ main (int argc, char** argv)
 		      stopsig = 1;
 		      exitval = 1;
 		      break;
+		    }
+		  
+		  /* Enforce maximum transmission rate */
+		  if ( maxrate )
+		    {
+		      uint64_t totalbits = (totalbytes + msr->reclen) * 8;
+		      
+		      gettimeofday (&now, NULL);
+		      
+		      /* Calculate interval since program start */
+		      interval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+				   ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
+		      
+		      /* Sleep if rate would be larger than maximum */
+		      if ( interval == 0.0 || ((double)totalbits / interval) > maxrate )
+			{
+			  /* Minimum interval needed for all data at maxrate */
+			  double rateinterval = ((double)totalbits / maxrate);
+			  
+			  /* Subtract interval since last packet */
+			  rateinterval -= interval;
+			  
+			  /* Sleep until within maximum rate */
+			  if ( rateinterval > 0 )
+			    {
+			      struct timespec naptime;
+			      naptime.tv_sec = 0;
+			      naptime.tv_nsec = (long) (rateinterval * 1.0e9);
+			      nanosleep (&naptime, NULL);
+			    }
+			}
 		    }
 		  
 		  lprintf (4, "Sending %s", streamid);
@@ -303,6 +342,11 @@ main (int argc, char** argv)
 			}
 		    }
 		  
+		  if ( maxrate )
+		    {
+		      gettimeofday (&lastpkt, NULL);
+		    }
+		  
 		  if ( iostats )
 		    {
 		      /* Only print stats if interval has passed */
@@ -310,13 +354,14 @@ main (int argc, char** argv)
 		      
 		      if ( iostatsprint.tv_sec < now.tv_sec )
 			{
-			  iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
-					      ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
+			  interval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+				       ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
 			  
-			  lprintf (0, "%s: sent %d%% (%.1f bytes/second, %.1f records/second)",
+			  makeratestr (ratestr, sizeof(ratestr), 8 * ((interval)?(file->bytecount/interval):0));
+			  
+			  lprintf (0, "%s: sent %d%% (%s, %.1f records/s)",
 				   file->name, (int)(100.0 * file->bytecount / file->size),
-				   (iostatsinterval)?(file->bytecount/iostatsinterval):0,
-				   (iostatsinterval)?(file->recordcount/iostatsinterval):0);
+				   ratestr, (interval)?(file->recordcount/interval):0);
 			  
 			  /* Increment iostats print interval time stamp */
 			  iostatsprint.tv_sec += iostatsint;
@@ -351,13 +396,14 @@ main (int argc, char** argv)
 		      /* Determine run time since filestart was set */
 		      gettimeofday (&now, NULL);
 		      
-		      iostatsinterval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
-					  ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
+		      interval = ( ((double)now.tv_sec + (double)now.tv_usec/1000000) -
+				   ((double)filestart.tv_sec + (double)filestart.tv_usec/1000000) );
 		      
-		      lprintf (0, "%s: sent in %.1f seconds (%.1f bytes/second, %.1f records/second)",
-			       file->name, iostatsinterval,
-			       (iostatsinterval)?(file->bytecount/iostatsinterval):0,
-			       (iostatsinterval)?(file->recordcount/iostatsinterval):0);
+		      makeratestr (ratestr, sizeof(ratestr), 8 * ((interval)?(file->bytecount/interval):0));
+		      
+		      lprintf (0, "%s: sent in %.1f seconds (%s, %.1f records/s)",
+			       file->name, interval, ratestr,
+			       (interval)?(file->recordcount/interval):0);
 		    }
 		}
 	      
@@ -390,14 +436,15 @@ main (int argc, char** argv)
   
   if ( ! quiet )
     {
-      iostatsinterval = ( ((double)procend.tv_sec + (double)procend.tv_usec/1000000) -
-			  ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
+      interval = ( ((double)procend.tv_sec + (double)procend.tv_usec/1000000) -
+		   ((double)procstart.tv_sec + (double)procstart.tv_usec/1000000) );
       
-      lprintf (0, "Time elapsed: %.1f seconds (%.1f bytes/second, %.1f records/second)",
-	       iostatsinterval,
-	       totalbytes/iostatsinterval,
-	       totalrecords/iostatsinterval);
-
+      makeratestr (ratestr, sizeof(ratestr), 8 * ((interval)?(totalbytes/interval):0));
+      
+      lprintf (0, "Time elapsed: %.1f seconds (%s, %.1f records/s)",
+	       interval, ratestr,
+	       totalrecords/interval);
+      
       lprintf (0, "Sent %llu bytes in %llu records from %llu file(s)",
 	       (unsigned long long) totalbytes,
 	       (unsigned long long) totalrecords,
@@ -760,6 +807,16 @@ processparam (int argcount, char **argvec)
         {
           writeack = 1;
         }
+      else if (strcmp (argvec[optind], "-mr") == 0)
+        {
+	  maxrate = calcbitsize (getoptval(argcount, argvec, optind++));
+	  
+	  if ( ! maxrate )
+	    {
+	      lprintf (0, "Error parsing maximum rate string");
+	      exit (1);
+	    }
+	}
       else if (strcmp (argvec[optind], "-I") == 0)
         {
 	  iostats = 1;
@@ -946,6 +1003,131 @@ getoptval (int argcount, char **argvec, int argopt)
   lprintf (0, "Option %s requires a value", argvec[argopt]);
   exit (1);
 }  /* End of getoptval() */
+
+
+/***************************************************************************
+ * calcbitsize:
+ * 
+ * Calculate a size in bits for the specified size string.  If the
+ * string is terminated with the following suffixes the specified
+ * scaling will be applied:
+ *
+ * 'K' or 'k' : kilobits - value * 1000
+ * 'M' or 'm' : megabits - value * 1000*1000
+ * 'G' or 'g' : gigabits - value * 1000*1000*1000
+ *
+ * Returns a size in bits on success and 0 on error.
+ ***************************************************************************/
+static int64_t
+calcbitsize (char *sizestr)
+{
+  long long int size = 0;
+  char *parsestr;
+  int termchar;
+  
+  if ( ! sizestr )
+    return 0;
+
+  if ( ! (parsestr = strdup (sizestr)) )
+    return 0;
+  
+  termchar = strlen (parsestr) - 1;
+  
+  if ( termchar <= 0 )
+    return 0;
+  
+  /* For kilobits */
+  if ( parsestr[termchar] == 'K' || parsestr[termchar] == 'k' )
+    {
+      parsestr[termchar] = '\0';
+      size = strtoll (parsestr, NULL, 10);
+      if ( ! size )
+        {
+          ms_log (1, "calcbitsize(): Error converting %s to integer", parsestr);
+          return 0;
+        }
+      size *= 1000;
+    }  
+  /* For megabits */
+  else if ( parsestr[termchar] == 'M' || parsestr[termchar] == 'm' )
+    {
+      parsestr[termchar] = '\0';
+      size = strtoll (parsestr, NULL, 10);
+      if ( ! size )
+        {
+          ms_log (1, "calcbitsize(): Error converting %s to integer", parsestr);
+          return 0;
+        }
+      size *= 1000*1000;
+    }
+  /* For gigabits */
+  else if ( parsestr[termchar] == 'G' || parsestr[termchar] == 'g' )
+    {
+      parsestr[termchar] = '\0';
+      size = strtoll (parsestr, NULL, 10);
+      if ( ! size )
+        {
+          ms_log (1, "calcbitsize(): Error converting %s to integer", parsestr);
+          return 0;
+        }
+      size *= 1000*1000*1000;
+    }
+  else
+    {
+      size = strtoll(parsestr, NULL, 10);
+      if ( ! size )
+        {
+          ms_log (1, "calcbitsize(): Error converting %s to integer", parsestr);
+          return 0;
+        }
+    }
+  
+  if ( parsestr )
+    free (parsestr);
+  
+  return (int64_t) size;
+}  /* End of calcbitsize() */
+
+
+/***************************************************************************
+ * makeratestr:
+ * 
+ * Create a rate string in bits per second a specified value.  The
+ * following suffixes will be used to create readable strings:
+ *
+ * 'bit/s'  : for values 0 - 999
+ * 'kbit/s' : for values 1000 - 999999
+ * 'Mbit/s' : for values 1000000 - 999999999
+ * 'Gbit/s' : for values 1000000000 - 999999999999
+ *
+ * Returns a size in bits on success and 0 on error.
+ ***************************************************************************/
+static int
+makeratestr (char *ratestr, int ratestrlen, uint64_t bps)
+{
+  if ( bps >= 1000000000 )
+    {
+      snprintf (ratestr, ratestrlen, "%.1f Gbit/s", (double)bps / 1000000000.0);
+      ratestr[ratestrlen-1] = '\0';
+    }
+  else if ( bps >= 1000000 )
+    {
+      snprintf (ratestr, ratestrlen, "%.1f Mbit/s", (double)bps / 1000000.0);
+      ratestr[ratestrlen-1] = '\0';
+    }
+  else if ( bps >= 1000 )
+    {
+      snprintf (ratestr, ratestrlen, "%.1f kbit/s", (double)bps / 1000.0);
+      ratestr[ratestrlen-1] = '\0';
+    }
+  else
+    {
+      snprintf (ratestr, ratestrlen, "%lld bit/s", (long long int)bps);
+      ratestr[ratestrlen-1] = '\0';
+    }
+  
+  return 0;
+}  /* End of makeratestr() */
 
 
 /***************************************************************************
@@ -1382,6 +1564,7 @@ usage()
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
 	  " -ACK           Require acknowledgements from the server for each record (slow)\n"
+          " -mr rate       Maximum transmission rate in bytes/second, no limit by default\n"
           " -I             Print transfer rate during transmission\n"
 	  " -It interval   Interval in seconds to print transfer statistics (default: %d)\n"
 	  " -w workdir     Location to write SYNC and state files, default is current dir\n"

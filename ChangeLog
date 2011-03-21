@@ -1,3 +1,9 @@
+2011.080:
+	- Update libmseed to 2.6.
+	- Update libdali to 1.4.
+	- Add -mr option to specify maximum bit rate for transmission.
+	- Convert verbose rate strings to bits/second instead of bytes.
+
 2010.129:
 	- Update libmseed to 2.5.1.
 	- Add -s option to specify a data selection file used to limit the

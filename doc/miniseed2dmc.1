@@ -1,4 +1,4 @@
-.TH MINISEED2DMC 1 2010/05/07
+.TH MINISEED2DMC 1 2011/03/21
 .SH NAME
 miniseed2dmc \- Transfer Mini-SEED data to a DMC
 .SH SYNOPSIS
@@ -95,6 +95,12 @@ necessary since TCP performs this function for the network layer,
 leaving only a very small potential that a server crash will lose data
 sent by the client.  It will also significantly slow down the transfer
 rate.
+
+.IP "-mr \fImaxrate\fP"
+Specify a maximum transmission rate in bits/second.  The suffixes
+\fBK\fP, \fBM\fP and \fBG\fP are recognized for the \fBmaxrate\fP
+value, e.g. '100M' is understood to be 100 megabits/second.  The
+transmission rate is not limited by default.
 
 .IP "-I"
 Print the transfer rate at a specified interval (the \fB-It\fP option)

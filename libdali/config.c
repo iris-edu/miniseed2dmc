@@ -4,7 +4,7 @@
  * File oriented utility routines to use with a DataLink connection
  * description.
  *
- * @author Chad Trabant, ORFEUS/EC-Project MEREDIAN
+ * @author Chad Trabant, IRIS Data Management Center
  *
  * modified: 2008.192
  ***************************************************************************/

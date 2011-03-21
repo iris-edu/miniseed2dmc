@@ -16,7 +16,7 @@
  * GNU-LGPL and further information can be found here:
  * http://www.gnu.org/
  *
- * Written by Chad Trabant, ORFEUS/EC-Project MEREDIAN
+ * Written by Chad Trabant, IRIS Data Management Center
  *
  * modified: 2008.193
  ***************************************************************************/

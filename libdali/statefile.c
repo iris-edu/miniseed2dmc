@@ -5,7 +5,7 @@
  *
  * @author Chad Trabant, IRIS Data Management Center
  *
- * modified: 2008.040
+ * modified: 2011.003
  ***************************************************************************/
 
 #include <stdio.h>
@@ -48,7 +48,8 @@ dl_savestate (DLCP *dlconn, const char *statefile)
   
   /* Write state information: <server address> <packet ID> <packet time> */
   linelen = snprintf (line, sizeof(line), "%s %lld %lld\n",
-		      dlconn->addr, dlconn->pktid, dlconn->pkttime);
+		      dlconn->addr, (long long int)dlconn->pktid,
+		      (long long int)dlconn->pkttime);
   
   if ( write (statefd, line, linelen) != linelen )
     {
@@ -85,8 +86,6 @@ dl_recoverstate (DLCP *dlconn, const char *statefile)
   int statefd;
   char line[200];
   char addrstr[100];
-  int64_t pktid;
-  dltime_t pkttime;
   int fields;
   int found = 0;
   int count = 1;
@@ -114,9 +113,12 @@ dl_recoverstate (DLCP *dlconn, const char *statefile)
   /* Loop through lines in the file and find the matching server address */
   while ( (dl_readline (statefd, line, sizeof(line))) >= 0 )
     {
+      long long int spktid;
+      long long int spkttime;
+      
       addrstr[0] = '\0';
       
-      fields = sscanf (line, "%s %lld %lld\n", addrstr, &pktid, &pkttime);
+      fields = sscanf (line, "%s %lld %lld\n", addrstr, &spktid, &spkttime);
       
       if ( fields < 0 )
         continue;
@@ -129,8 +131,8 @@ dl_recoverstate (DLCP *dlconn, const char *statefile)
       /* Check for a matching server address and set connection values if found */
       if ( ! strncmp (dlconn->addr, addrstr, sizeof(addrstr)) )
 	{
-	  dlconn->pktid = pktid;
-	  dlconn->pkttime = pkttime;
+	  dlconn->pktid = spktid;
+	  dlconn->pkttime = spkttime;
 	  
 	  found = 1;
 	  break;

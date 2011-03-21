@@ -8,7 +8,7 @@ NODEBUG=1
 !include <ntwin32.mak>
 
 INCS = /I..
-LIBS = ../libdali.lib ws2_32.lib
+LIBS = ../libdali.lib ws2_32.lib advapi32.lib
 BIN = daliclient.exe
 
 OBJS =	daliclient.obj
@@ -21,7 +21,7 @@ daliclient: $(OBJS)
 	link.exe /nologo /out:$(BIN) $(LIBS) $(OBJS)
 
 .c.obj:
-   $(cc) /nologo $(cflags) $(cdebug) $(cvarsmt) $(tflags) $(INCS) $<
+	$(cc) /nologo $(cflags) $(cdebug) $(cvarsmt) $(tflags) $(INCS) $<
 
 # Clean-up directives
 clean:

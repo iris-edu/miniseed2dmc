@@ -1,11 +1,11 @@
- /***********************************************************************//**
+/***********************************************************************//**
  * @file connection.c
  *
  * Routines for managing a connection with a DataLink server.
  *
  * @author Chad Trabant, IRIS Data Management Center
  *
- * modified: 2008.284
+ * modified: 2011.005
  ***************************************************************************/
 
 #include <stdlib.h>
@@ -218,8 +218,13 @@ dl_exchangeIDs (DLCP *dlconn, int parseresp)
  * Set the client read position to a specified packet ID and packet
  * time.  A packet ID and time together uniquely identify a packet in
  * a DataLink server.  The packet time must match the packet ID
- * current in the server's buffer or the positioning request will
+ * currently in the server's buffer or the positioning request will
  * fail.
+ *
+ * As a special case @a pktid maybe be set to @a LIBDALI_POSITION_EARLIEST
+ * or @a LIBDALI_POSITION_LATEST to set the client read position to
+ * the earliest or latest packet.  In both cases the @a pkttime value
+ * is ignored.
  *
  * @param dlconn DataLink Connection Parameters
  * @param pktid Packet ID to set position to
@@ -240,7 +245,7 @@ dl_position (DLCP *dlconn, int64_t pktid, dltime_t pkttime)
   if ( ! dlconn )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   if ( pktid < 0 )
@@ -254,9 +259,23 @@ dl_position (DLCP *dlconn, int64_t pktid, dltime_t pkttime)
       return -1;
     }
   
-  /* Create packet header with command: "POSITION SET pktid pkttime" */
-  headerlen = snprintf (header, sizeof(header), "POSITION SET %lld %lld",
-			pktid, pkttime);
+  /* When positioning to earliest or latest packet in the ring, ignore pkttime */
+  if ( pktid == LIBDALI_POSITION_EARLIEST )
+    {
+      /* Create packet header with command: "POSITION SET EARLIEST" */
+      headerlen = snprintf (header, sizeof(header), "POSITION SET EARLIEST");
+    }
+  else if ( pktid == LIBDALI_POSITION_LATEST )
+    {
+      /* Create packet header with command: "POSITION SET LATEST" */
+      headerlen = snprintf (header, sizeof(header), "POSITION SET LATEST");
+    }
+  else 
+    {
+      /* Create packet header with command: "POSITION SET pktid pkttime" */
+      headerlen = snprintf (header, sizeof(header), "POSITION SET %lld %lld",
+			    (long long int)pktid, (long long int)pkttime);
+    }
   
   /* Send command to server */
   replylen = dl_sendpacket (dlconn, header, headerlen, NULL, 0,
@@ -276,7 +295,7 @@ dl_position (DLCP *dlconn, int64_t pktid, dltime_t pkttime)
   if ( rv >= 0 )
     dl_log_r (dlconn, 1, 1, "[%s] %s\n", dlconn->addr, reply);
   
-  return ( rv < 0 ) ? -1 : replyvalue;
+  return ( rv < 0 || replyvalue <= 0 ) ? -1 : replyvalue;
 }  /* End of dl_position() */
 
 
@@ -306,7 +325,7 @@ dl_position_after (DLCP *dlconn, dltime_t datatime)
   if ( ! dlconn )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   /* Sanity check that connection is not in streaming mode */
@@ -319,7 +338,7 @@ dl_position_after (DLCP *dlconn, dltime_t datatime)
   
   /* Create packet header with command: "POSITION AFTER datatime" */
   headerlen = snprintf (header, sizeof(header), "POSITION AFTER %lld",
-			datatime);
+			(long long int)datatime);
   
   /* Send command to server */
   replylen = dl_sendpacket (dlconn, header, headerlen, NULL, 0,
@@ -374,7 +393,7 @@ dl_match (DLCP *dlconn, char *matchpattern)
   if ( ! dlconn )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   /* Sanity check that connection is not in streaming mode */
@@ -445,7 +464,7 @@ dl_reject (DLCP *dlconn, char *rejectpattern)
   if ( ! dlconn )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   /* Sanity check that connection is not in streaming mode */
@@ -522,10 +541,16 @@ dl_write (DLCP *dlconn, void *packet, int packetlen, char *streamid,
   int rv;
   
   if ( ! dlconn || ! packet || ! streamid )
-    return -1;
+    {
+      dl_log_r (dlconn, 1, 1, "dl_write(): dlconn || packet || streamid is not anticipated value \n");
+      return -1;
+    }
   
-  if ( dlconn->link <= 0 )
-    return -1;
+  if ( dlconn->link < 0 )
+    {
+      dl_log_r (dlconn, 1, 3, "[%s] dl_write(): dlconn->link = %d, expect >=0 \n", dlconn->addr, dlconn->link);
+      return -1;
+    }
   
   /* Sanity check that connection is not in streaming mode */
   if ( dlconn->streaming )
@@ -546,7 +571,8 @@ dl_write (DLCP *dlconn, void *packet, int packetlen, char *streamid,
   /* Create packet header with command: "WRITE streamid hpdatastart hpdataend flags size" */
   headerlen = snprintf (header, sizeof(header),
 			"WRITE %s %lld %lld %s %d",
-			streamid, datastart, dataend, flags, packetlen);
+			streamid, (long long int)datastart, (long long int)dataend,
+			flags, packetlen);
   
   /* Send command and packet to server */
   replylen = dl_sendpacket (dlconn, header, headerlen,
@@ -614,10 +640,16 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
   int headerlen;
   int rv = 0;
   
+  long long int spktid;
+  long long int spkttime;
+  long long int sdatastart;
+  long long int sdataend;
+  long long int sdatasize;
+  
   if ( ! dlconn || ! packet || ! packetdata )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   /* Sanity check that connection is not in streaming mode */
@@ -632,7 +664,7 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
   if ( pktid > 0 )
     {
       /* Create packet header with command: "READ pktid" */
-      headerlen = snprintf (header, sizeof(header), "READ %lld", pktid);
+      headerlen = snprintf (header, sizeof(header), "READ %lld", (long long int)pktid);
       
       /* Send command and packet to server */
       if ( dl_sendpacket (dlconn, header, headerlen, NULL, 0, NULL, 0) < 0 )
@@ -656,9 +688,9 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
   if ( ! strncmp (header, "PACKET", 6) )
     {
       /* Parse PACKET header */
-      rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
-		   packet->streamid, &(packet->pktid), &(packet->pkttime),
-		   &(packet->datastart), &(packet->dataend), &(packet->datasize));
+      rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %lldd",
+		   packet->streamid, &spktid, &spkttime,
+		   &sdatastart, &sdataend, &sdatasize);
       
       if ( rv != 6 )
 	{
@@ -666,6 +698,12 @@ dl_read (DLCP *dlconn, int64_t pktid, DLPacket *packet, void *packetdata,
 		    dlconn->addr);
 	  return -1;
 	}
+      
+      packet->pktid = spktid;
+      packet->pkttime = spkttime;
+      packet->datastart = sdatastart;
+      packet->dataend = sdataend;
+      packet->datasize = sdatasize;
       
       /* Check that the packet data size is not beyond the max receive buffer size */
       if ( packet->datasize > maxdatasize )
@@ -775,7 +813,7 @@ dl_getinfo (DLCP *dlconn, const char *infotype, char *infomatch,
   if ( maxinfosize && ! *infodata )
     return -1;
   
-  if ( dlconn->link <= 0 )
+  if ( dlconn->link < 0 )
     return -1;
   
   /* Sanity check that connection is not in streaming mode */
@@ -912,6 +950,12 @@ dl_collect (DLCP *dlconn, DLPacket *packet, void *packetdata,
   char header[255];
   int  headerlen;
   int  rv;
+
+  long long int spktid;
+  long long int spkttime;
+  long long int sdatastart;
+  long long int sdataend;
+  long long int sdatasize;
   
   /* For select()ing during the read loop */
   struct timeval select_tv;
@@ -1021,9 +1065,9 @@ dl_collect (DLCP *dlconn, DLPacket *packet, void *packetdata,
 	      if ( ! strncmp (header, "PACKET", 6) )
 		{
 		  /* Parse PACKET header */
-		  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
-			       packet->streamid, &(packet->pktid), &(packet->pkttime),
-			       &(packet->datastart), &(packet->dataend), &(packet->datasize));
+		  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %lld",
+			       packet->streamid, &spktid, &spkttime,
+			       &sdatastart, &sdataend, &sdatasize);
 		  
 		  if ( rv != 6 )
 		    {
@@ -1031,6 +1075,12 @@ dl_collect (DLCP *dlconn, DLPacket *packet, void *packetdata,
 				dlconn->addr);
 		      return DLERROR;
 		    }
+		  
+		  packet->pktid = spktid;
+		  packet->pkttime = spkttime;
+		  packet->datastart = sdatastart;
+		  packet->dataend = sdataend;
+		  packet->datasize = sdatasize;
 		  
 		  if ( packet->datasize > maxdatasize )
 		    {
@@ -1142,6 +1192,12 @@ dl_collect_nb (DLCP *dlconn, DLPacket *packet, void *packetdata,
   int  headerlen;
   int  rv;
   
+  long long int spktid;
+  long long int spkttime;
+  long long int sdatastart;
+  long long int sdataend;
+  long long int sdatasize;
+
   if ( ! dlconn || ! packet || ! packetdata )
     return DLERROR;
   
@@ -1229,9 +1285,9 @@ dl_collect_nb (DLCP *dlconn, DLPacket *packet, void *packetdata,
       if ( ! strncmp (header, "PACKET", 6) )
 	{
 	  /* Parse PACKET header */
-	  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %d",
-		       packet->streamid, &(packet->pktid), &(packet->pkttime),
-		       &(packet->datastart), &(packet->dataend), &(packet->datasize));
+	  rv = sscanf (header, "PACKET %s %lld %lld %lld %lld %lld",
+		       packet->streamid, &spktid, &spkttime,
+		       &sdatastart, &sdataend, &sdatasize);
 	  
 	  if ( rv != 6 )
 	    {
@@ -1239,6 +1295,12 @@ dl_collect_nb (DLCP *dlconn, DLPacket *packet, void *packetdata,
 			dlconn->addr);
 	      return DLERROR;
 	    }
+	  
+	  packet->pktid = spktid;
+	  packet->pkttime = spkttime;
+	  packet->datastart = sdatastart;
+	  packet->dataend = sdataend;
+	  packet->datasize = sdatasize;
 	  
 	  if ( packet->datasize > maxdatasize )
 	    {
@@ -1329,8 +1391,8 @@ dl_handlereply (DLCP *dlconn, void *buffer, int buflen, int64_t *value)
 {
   char status[10];
   char *cbuffer = buffer;
-  int64_t pvalue;
-  int64_t size = 0;
+  long long int pvalue;
+  long long int size = 0;
   int rv = 0;
   
   if ( ! dlconn || ! buffer )

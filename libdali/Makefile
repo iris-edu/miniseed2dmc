@@ -12,8 +12,8 @@ LIB_OBJS = timeutils.o genutils.o strutils.o \
            logging.o network.o statefile.o config.o \
            portable.o connection.o
 
-CURRENT_VER = 1.0
-COMPAT_VER = 1.0
+CURRENT_VER = 1.3
+COMPAT_VER = 1.3
 
 LIB_A = libdali.a
 LIB_SO = libdali.so.$(CURRENT_VER)
