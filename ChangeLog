@@ -1,6 +1,8 @@
 2011.080:
 	- Update libmseed to 2.6.
 	- Update libdali to 1.4.
+	- Save the state file after each file is processed for increased
+	crash mitigation.
 	- Add -mr option to specify maximum bit rate for transmission.
 	- Convert verbose rate strings to bits/second instead of bytes.
 

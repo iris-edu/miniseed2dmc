@@ -412,6 +412,10 @@ main (int argc, char** argv)
 	      
 	      totalfiles++;
 	      
+	      /* Save the state file if not the last file */
+	      if ( file->next && statefile )
+		savestate (statefile);
+	      
 	      if ( ! file->next )  /* If that was the last file set the stop signal */
 		stopsig = 1;
 	      else                 /* Otherwise increment to the next file in the list */
