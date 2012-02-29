@@ -1568,7 +1568,7 @@ usage()
 	  " -q             Be quiet, do not print diagnostics or transmission summary\n"
 	  " -NS            Do not write a SYNC file after sending data\n"
 	  " -ACK           Require acknowledgements from the server for each record (slow)\n"
-          " -mr rate       Maximum transmission rate in bytes/second, no limit by default\n"
+          " -mr rate       Maximum transmission rate in bits/second, no limit by default\n"
           " -I             Print transfer rate during transmission\n"
 	  " -It interval   Interval in seconds to print transfer statistics (default: %d)\n"
 	  " -w workdir     Location to write SYNC and state files, default is current dir\n"
