@@ -4,19 +4,21 @@
  * 
  * Interface declarations for the Mini-SEED library (libmseed).
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public License
- * as published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
+ * This library is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License (GNU-LGPL) for more details.  The
- * GNU-LGPL and further information can be found here:
- * http://www.gnu.org/
+ * Lesser General Public License (GNU-LGPL) for more details.
  *
- * Written by Chad Trabant
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this software.
+ * If not, see <https://www.gnu.org/licenses/>.
+ *
+ * Copyright (C) 2016 Chad Trabant
  * IRIS Data Management Center
  ***************************************************************************/
 
@@ -30,10 +32,11 @@ extern "C" {
 
 #include "lmplatform.h"
 
-#define LIBMSEED_VERSION "2.6"
-#define LIBMSEED_RELEASE "2011.056"
+#define LIBMSEED_VERSION "2.18"
+#define LIBMSEED_RELEASE "2016.286"
 
-#define MINRECLEN   256      /* Minimum Mini-SEED record length, 2^8 bytes */
+#define MINRECLEN   128      /* Minimum Mini-SEED record length, 2^7 bytes */
+                             /* Note: the SEED specification minimum is 256 */
 #define MAXRECLEN   1048576  /* Maximum Mini-SEED record length, 2^20 bytes */
 
 /* SEED data encoding types */
@@ -80,6 +83,17 @@ extern "C" {
 /* Macro to test default sample rate tolerance: abs(1-sr1/sr2) < 0.0001 */
 #define MS_ISRATETOLERABLE(A,B) (ms_dabs (1.0 - (A / B)) < 0.0001)
 
+/* Macro to test for sane year and day values, used primarily to
+ * determine if byte order swapping is needed.
+ * 
+ * Year : between 1900 and 2100
+ * Day  : between 1 and 366
+ *
+ * This test is non-unique (non-deterministic) for days 1, 256 and 257
+ * in the year 2056 because the swapped values are also within range.
+ */
+#define MS_ISVALIDYEARDAY(Y,D) (Y >= 1900 && Y <= 2100 && D >= 1 && D <= 366)
+
 /* Macro to test memory for a SEED data record signature by checking
  * SEED data record header values at known byte offsets to determine
  * if the memory contains a valid record.
@@ -95,18 +109,18 @@ extern "C" {
  * Usage:
  *   MS_ISVALIDHEADER ((char *)X)  X buffer must contain at least 27 bytes
  */
-#define MS_ISVALIDHEADER(X) (                                           \
-  (isdigit ((unsigned char) *(X)) || *(X) == ' ' || !*(X) ) &&		\
-  (isdigit ((unsigned char) *(X+1)) || *(X+1) == ' ' || !*(X+1) ) &&	\
-  (isdigit ((unsigned char) *(X+2)) || *(X+2) == ' ' || !*(X+2) ) &&	\
-  (isdigit ((unsigned char) *(X+3)) || *(X+3) == ' ' || !*(X+3) ) &&	\
-  (isdigit ((unsigned char) *(X+4)) || *(X+4) == ' ' || !*(X+4) ) &&	\
-  (isdigit ((unsigned char) *(X+5)) || *(X+5) == ' ' || !*(X+5) ) &&	\
-  MS_ISDATAINDICATOR(*(X+6)) &&						\
-  (*(X+7) == ' ' || *(X+7) == '\0') &&					\
-  (int)(*(X+24)) >= 0 && (int)(*(X+24)) <= 23 &&			\
-  (int)(*(X+25)) >= 0 && (int)(*(X+25)) <= 59 &&			\
-  (int)(*(X+26)) >= 0 && (int)(*(X+26)) <= 60)
+#define MS_ISVALIDHEADER(X) (                               \
+  (isdigit ((int) *(X))   || *(X)   == ' ' || !*(X) )   &&  \
+  (isdigit ((int) *(X+1)) || *(X+1) == ' ' || !*(X+1) ) &&  \
+  (isdigit ((int) *(X+2)) || *(X+2) == ' ' || !*(X+2) ) &&  \
+  (isdigit ((int) *(X+3)) || *(X+3) == ' ' || !*(X+3) ) &&  \
+  (isdigit ((int) *(X+4)) || *(X+4) == ' ' || !*(X+4) ) &&  \
+  (isdigit ((int) *(X+5)) || *(X+5) == ' ' || !*(X+5) ) &&  \
+  MS_ISDATAINDICATOR(*(X+6)) &&                             \
+  (*(X+7) == ' ' || *(X+7) == '\0') &&                      \
+  (int)(*(X+24)) >= 0 && (int)(*(X+24)) <= 23 &&            \
+  (int)(*(X+25)) >= 0 && (int)(*(X+25)) <= 59 &&            \
+  (int)(*(X+26)) >= 0 && (int)(*(X+26)) <= 60 )
 
 /* Macro to test memory for a blank/noise SEED data record signature
  * by checking for a valid SEED sequence number and padding characters
@@ -119,26 +133,27 @@ extern "C" {
  * Usage:
  *   MS_ISVALIDBLANK ((char *)X)  X buffer must contain at least 27 bytes
  */
-#define MS_ISVALIDBLANK(X) ((isdigit ((unsigned char) *(X)) || !*(X) ) &&     \
-			    (isdigit ((unsigned char) *(X+1)) || !*(X+1) ) && \
-			    (isdigit ((unsigned char) *(X+2)) || !*(X+2) ) && \
-			    (isdigit ((unsigned char) *(X+3)) || !*(X+3) ) && \
-			    (isdigit ((unsigned char) *(X+4)) || !*(X+4) ) && \
-			    (isdigit ((unsigned char) *(X+5)) || !*(X+5) ) && \
-			    (*(X+6)==' ')&&(*(X+7)==' ')&&(*(X+8)==' ') &&    \
-			    (*(X+9)==' ')&&(*(X+10)==' ')&&(*(X+11)==' ') &&  \
-			    (*(X+12)==' ')&&(*(X+13)==' ')&&(*(X+14)==' ') && \
-			    (*(X+15)==' ')&&(*(X+16)==' ')&&(*(X+17)==' ') && \
-			    (*(X+18)==' ')&&(*(X+19)==' ')&&(*(X+20)==' ') && \
-			    (*(X+21)==' ')&&(*(X+22)==' ')&&(*(X+23)==' ') && \
-			    (*(X+24)==' ')&&(*(X+25)==' ')&&(*(X+26)==' ') && \
-			    (*(X+27)==' ')&&(*(X+28)==' ')&&(*(X+29)==' ') && \
-			    (*(X+30)==' ')&&(*(X+31)==' ')&&(*(X+32)==' ') && \
-			    (*(X+33)==' ')&&(*(X+34)==' ')&&(*(X+35)==' ') && \
-			    (*(X+36)==' ')&&(*(X+37)==' ')&&(*(X+38)==' ') && \
-			    (*(X+39)==' ')&&(*(X+40)==' ')&&(*(X+41)==' ') && \
-			    (*(X+42)==' ')&&(*(X+43)==' ')&&(*(X+44)==' ') && \
-			    (*(X+45)==' ')&&(*(X+46)==' ')&&(*(X+47)==' ') )
+#define MS_ISVALIDBLANK(X) (                             \
+  (isdigit ((int) *(X))   || !*(X) ) &&                  \
+  (isdigit ((int) *(X+1)) || !*(X+1) ) &&                \
+  (isdigit ((int) *(X+2)) || !*(X+2) ) &&                \
+  (isdigit ((int) *(X+3)) || !*(X+3) ) &&                \
+  (isdigit ((int) *(X+4)) || !*(X+4) ) &&                \
+  (isdigit ((int) *(X+5)) || !*(X+5) ) &&                \
+  (*(X+6) ==' ') && (*(X+7) ==' ') && (*(X+8) ==' ') &&  \
+  (*(X+9) ==' ') && (*(X+10)==' ') && (*(X+11)==' ') &&  \
+  (*(X+12)==' ') && (*(X+13)==' ') && (*(X+14)==' ') &&  \
+  (*(X+15)==' ') && (*(X+16)==' ') && (*(X+17)==' ') &&  \
+  (*(X+18)==' ') && (*(X+19)==' ') && (*(X+20)==' ') &&  \
+  (*(X+21)==' ') && (*(X+22)==' ') && (*(X+23)==' ') &&  \
+  (*(X+24)==' ') && (*(X+25)==' ') && (*(X+26)==' ') &&  \
+  (*(X+27)==' ') && (*(X+28)==' ') && (*(X+29)==' ') &&  \
+  (*(X+30)==' ') && (*(X+31)==' ') && (*(X+32)==' ') &&  \
+  (*(X+33)==' ') && (*(X+34)==' ') && (*(X+35)==' ') &&  \
+  (*(X+36)==' ') && (*(X+37)==' ') && (*(X+38)==' ') &&  \
+  (*(X+39)==' ') && (*(X+40)==' ') && (*(X+41)==' ') &&  \
+  (*(X+42)==' ') && (*(X+43)==' ') && (*(X+44)==' ') &&  \
+  (*(X+45)==' ') && (*(X+46)==' ') && (*(X+47)==' ') )
 
 /* A simple bitwise AND test to return 0 or 1 */
 #define bit(x,y) (x&y)?1:0
@@ -165,24 +180,24 @@ BTime;
 /* Fixed section data of header */
 struct fsdh_s
 {
-  char           sequence_number[6];
-  char           dataquality;
-  char           reserved;
-  char           station[5];
-  char           location[2];
-  char           channel[3];
-  char           network[2];
-  BTime          start_time;
-  uint16_t       numsamples;
-  int16_t        samprate_fact;
-  int16_t        samprate_mult;
-  uint8_t        act_flags;
-  uint8_t        io_flags;
-  uint8_t        dq_flags;
-  uint8_t        numblockettes;
-  int32_t        time_correct;
-  uint16_t       data_offset;
-  uint16_t       blockette_offset;
+  char      sequence_number[6];
+  char      dataquality;
+  char      reserved;
+  char      station[5];
+  char      location[2];
+  char      channel[3];
+  char      network[2];
+  BTime     start_time;
+  uint16_t  numsamples;
+  int16_t   samprate_fact;
+  int16_t   samprate_mult;
+  uint8_t   act_flags;
+  uint8_t   io_flags;
+  uint8_t   dq_flags;
+  uint8_t   numblockettes;
+  int32_t   time_correct;
+  uint16_t  data_offset;
+  uint16_t  blockette_offset;
 } LMP_PACKED;
 
 /* Blockette 100, Sample Rate (without header) */
@@ -386,13 +401,13 @@ typedef struct MSRecord_s {
   char            dataquality;       /* Data quality indicator */
   hptime_t        starttime;         /* Record start time, corrected (first sample) */
   double          samprate;          /* Nominal sample rate (Hz) */
-  int32_t         samplecnt;         /* Number of samples in record */
+  int64_t         samplecnt;         /* Number of samples in record */
   int8_t          encoding;          /* Data encoding format */
   int8_t          byteorder;         /* Original/Final byte order of record */
   
   /* Data sample fields */
   void           *datasamples;       /* Data samples, 'numsamples' of type 'sampletype'*/
-  int32_t         numsamples;        /* Number of data samples in datasamples */
+  int64_t         numsamples;        /* Number of data samples in datasamples */
   char            sampletype;        /* Sample type code: a, i, f, d */
   
   /* Stream oriented state information */
@@ -411,9 +426,9 @@ typedef struct MSTrace_s {
   hptime_t        starttime;         /* Time of first sample */
   hptime_t        endtime;           /* Time of last sample */
   double          samprate;          /* Nominal sample rate (Hz) */
-  int32_t         samplecnt;         /* Number of samples in trace coverage */
-  void           *datasamples;       /* Data samples, 'numsamples' of type 'sampletype'*/
-  int32_t         numsamples;        /* Number of data samples in datasamples */
+  int64_t         samplecnt;         /* Number of samples in trace coverage */
+  void           *datasamples;       /* Data samples, 'numsamples' of type 'sampletype' */
+  int64_t         numsamples;        /* Number of data samples in datasamples */
   char            sampletype;        /* Sample type code: a, i, f, d */
   void           *prvtptr;           /* Private pointer for general use, unused by libmseed */
   StreamState    *ststate;           /* Stream processing state information */
@@ -433,9 +448,9 @@ typedef struct MSTraceSeg_s {
   hptime_t        starttime;         /* Time of first sample */
   hptime_t        endtime;           /* Time of last sample */
   double          samprate;          /* Nominal sample rate (Hz) */
-  int32_t         samplecnt;         /* Number of samples in trace coverage */
+  int64_t         samplecnt;         /* Number of samples in trace coverage */
   void           *datasamples;       /* Data samples, 'numsamples' of type 'sampletype'*/
-  int32_t         numsamples;        /* Number of data samples in datasamples */
+  int64_t         numsamples;        /* Number of data samples in datasamples */
   char            sampletype;        /* Sample type code: a, i, f, d */
   void           *prvtptr;           /* Private pointer for general use, unused by libmseed */
   struct MSTraceSeg_s *prev;         /* Pointer to previous segment */
@@ -510,13 +525,19 @@ extern int unpackencodingfallback;
 extern int           msr_parse (char *record, int recbuflen, MSRecord **ppmsr, int reclen,
 				flag dataflag, flag verbose);
 
+extern int           msr_parse_selection ( char *recbuf, int recbuflen, int64_t *offset,
+					   MSRecord **ppmsr, int reclen,
+					   Selections *selections, flag dataflag, flag verbose );
+
 extern int           msr_unpack (char *record, int reclen, MSRecord **ppmsr,
 				 flag dataflag, flag verbose);
 
 extern int           msr_pack (MSRecord *msr, void (*record_handler) (char *, int, void *),
-		 	       void *handlerdata, int *packedsamples, flag flush, flag verbose );
+		 	       void *handlerdata, int64_t *packedsamples, flag flush, flag verbose );
 
 extern int           msr_pack_header (MSRecord *msr, flag normalize, flag verbose);
+
+extern int           msr_unpack_data (MSRecord *msr, int swapflag, flag verbose);
 
 extern MSRecord*     msr_init (MSRecord *msr);
 extern void          msr_free (MSRecord **ppmsr);
@@ -551,13 +572,14 @@ extern MSTrace*      mst_findadjacent (MSTraceGroup *mstg, flag *whence, char da
 				       hptime_t starttime, hptime_t endtime, double timetol);
 extern int           mst_addmsr (MSTrace *mst, MSRecord *msr, flag whence);
 extern int           mst_addspan (MSTrace *mst, hptime_t starttime,  hptime_t endtime,
-				  void *datasamples, int numsamples,
+				  void *datasamples, int64_t numsamples,
 				  char sampletype, flag whence);
 extern MSTrace*      mst_addmsrtogroup (MSTraceGroup *mstg, MSRecord *msr, flag dataquality,
 					double timetol, double sampratetol);
 extern MSTrace*      mst_addtracetogroup (MSTraceGroup *mstg, MSTrace *mst);
 extern int           mst_groupheal (MSTraceGroup *mstg, double timetol, double sampratetol);
 extern int           mst_groupsort (MSTraceGroup *mstg, flag quality);
+extern int           mst_convertsamples (MSTrace *mst, char type, flag truncate);
 extern char *        mst_srcname (MSTrace *mst, char *srcname, flag quality);
 extern void          mst_printtracelist (MSTraceGroup *mstg, flag timeformat,
 					 flag details, flag gaps);
@@ -566,11 +588,11 @@ extern void          mst_printgaplist (MSTraceGroup *mstg, flag timeformat,
 				       double *mingap, double *maxgap);
 extern int           mst_pack (MSTrace *mst, void (*record_handler) (char *, int, void *),
 			       void *handlerdata, int reclen, flag encoding, flag byteorder,
-			       int *packedsamples, flag flush, flag verbose,
+			       int64_t *packedsamples, flag flush, flag verbose,
 			       MSRecord *mstemplate);
 extern int           mst_packgroup (MSTraceGroup *mstg, void (*record_handler) (char *, int, void *),
 				    void *handlerdata, int reclen, flag encoding, flag byteorder,
-				    int *packedsamples, flag flush, flag verbose,
+				    int64_t *packedsamples, flag flush, flag verbose,
 				    MSRecord *mstemplate);
 
 /* MSTraceList related functions */
@@ -578,6 +600,7 @@ extern MSTraceList * mstl_init ( MSTraceList *mstl );
 extern void          mstl_free ( MSTraceList **ppmstl, flag freeprvtptr );
 extern MSTraceSeg *  mstl_addmsr ( MSTraceList *mstl, MSRecord *msr, flag dataquality,
 				   flag autoheal, double timetol, double sampratetol );
+extern int           mstl_convertsamples ( MSTraceSeg *seg, char type, flag truncate );
 extern void          mstl_printtracelist ( MSTraceList *mstl, flag timeformat,
 					   flag details, flag gaps );
 extern void          mstl_printsynclist ( MSTraceList *mstl, char *dccid, flag subsecond );
@@ -599,36 +622,37 @@ typedef struct MSFileParam_s
   int   recordcount;
 } MSFileParam;
 
-extern int      ms_readmsr (MSRecord **ppmsr, char *msfile, int reclen, off_t *fpos, int *last,
+extern int      ms_readmsr (MSRecord **ppmsr, const char *msfile, int reclen, off_t *fpos, int *last,
 			    flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readmsr_r (MSFileParam **ppmsfp, MSRecord **ppmsr, char *msfile, int reclen,
+extern int      ms_readmsr_r (MSFileParam **ppmsfp, MSRecord **ppmsr, const char *msfile, int reclen,
 			      off_t *fpos, int *last, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readmsr_main (MSFileParam **ppmsfp, MSRecord **ppmsr, char *msfile, int reclen,
+extern int      ms_readmsr_main (MSFileParam **ppmsfp, MSRecord **ppmsr, const char *msfile, int reclen,
 				 off_t *fpos, int *last, flag skipnotdata, flag dataflag, Selections *selections, flag verbose);
-extern int      ms_readtraces (MSTraceGroup **ppmstg, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtraces (MSTraceGroup **ppmstg, const char *msfile, int reclen, double timetol, double sampratetol,
 			       flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readtraces_timewin (MSTraceGroup **ppmstg, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtraces_timewin (MSTraceGroup **ppmstg, const char *msfile, int reclen, double timetol, double sampratetol,
 				       hptime_t starttime, hptime_t endtime, flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readtraces_selection (MSTraceGroup **ppmstg, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtraces_selection (MSTraceGroup **ppmstg, const char *msfile, int reclen, double timetol, double sampratetol,
 					 Selections *selections, flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readtracelist (MSTraceList **ppmstl, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtracelist (MSTraceList **ppmstl, const char *msfile, int reclen, double timetol, double sampratetol,
 				  flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readtracelist_timewin (MSTraceList **ppmstl, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtracelist_timewin (MSTraceList **ppmstl, const char *msfile, int reclen, double timetol, double sampratetol,
 					  hptime_t starttime, hptime_t endtime, flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
-extern int      ms_readtracelist_selection (MSTraceList **ppmstl, char *msfile, int reclen, double timetol, double sampratetol,
+extern int      ms_readtracelist_selection (MSTraceList **ppmstl, const char *msfile, int reclen, double timetol, double sampratetol,
 					    Selections *selections, flag dataquality, flag skipnotdata, flag dataflag, flag verbose);
 
-extern int      msr_writemseed ( MSRecord *msr, char *msfile, flag overwrite, int reclen,
+extern int      msr_writemseed ( MSRecord *msr, const char *msfile, flag overwrite, int reclen,
 				 flag encoding, flag byteorder, flag verbose );
-extern int      mst_writemseed ( MSTrace *mst, char *msfile, flag overwrite, int reclen,
+extern int      mst_writemseed ( MSTrace *mst, const char *msfile, flag overwrite, int reclen,
 				 flag encoding, flag byteorder, flag verbose );
-extern int      mst_writemseedgroup ( MSTraceGroup *mstg, char *msfile, flag overwrite,
+extern int      mst_writemseedgroup ( MSTraceGroup *mstg, const char *msfile, flag overwrite,
 				      int reclen, flag encoding, flag byteorder, flag verbose );
 
 /* General use functions */
 extern char*    ms_recsrcname (char *record, char *srcname, flag quality);
 extern int      ms_splitsrcname (char *srcname, char *net, char *sta, char *loc, char *chan, char *qual);
 extern int      ms_strncpclean (char *dest, const char *source, int length);
+extern int      ms_strncpcleantail (char *dest, const char *source, int length);
 extern int      ms_strncpopen (char *dest, const char *source, int length);
 extern int      ms_doy2md (int year, int jday, int *month, int *mday);
 extern int      ms_md2doy (int year, int month, int mday, int *jday);
@@ -636,6 +660,7 @@ extern hptime_t ms_btime2hptime (BTime *btime);
 extern char*    ms_btime2isotimestr (BTime *btime, char *isotimestr);
 extern char*    ms_btime2mdtimestr (BTime *btime, char *mdtimestr);
 extern char*    ms_btime2seedtimestr (BTime *btime, char *seedtimestr);
+extern int      ms_hptime2tomsusecoffset (hptime_t hptime, hptime_t *toms, int8_t *usecoffset);
 extern int      ms_hptime2btime (hptime_t hptime, BTime *btime);
 extern char*    ms_hptime2isotimestr (hptime_t hptime, char *isotimestr, flag subsecond);
 extern char*    ms_hptime2mdtimestr (hptime_t hptime, char *mdtimestr, flag subsecond);
@@ -646,8 +671,9 @@ extern hptime_t ms_timestr2hptime (char *timestr);
 extern double   ms_nomsamprate (int factor, int multiplier);
 extern int      ms_genfactmult (double samprate, int16_t *factor, int16_t *multiplier);
 extern int      ms_ratapprox (double real, int *num, int *den, int maxval, double precision);
-extern int      ms_bigendianhost ();
+extern int      ms_bigendianhost (void);
 extern double   ms_dabs (double val);
+extern double   ms_rsqrt64 (double val);
 
 
 /* Lookup functions */
@@ -663,9 +689,9 @@ extern char *   ms_errorstr (int errorcode);
 /* Logging parameters */
 typedef struct MSLogParam_s
 {
-  void (*log_print)();
+  void (*log_print)(char*);
   const char *logprefix;
-  void (*diag_print)();
+  void (*diag_print)(char*);
   const char *errprefix;
 } MSLogParam;
 
@@ -688,6 +714,18 @@ extern int      ms_addselect_comp (Selections **ppselections, char *net, char* s
 extern int      ms_readselectionsfile (Selections **ppselections, char *filename);
 extern void     ms_freeselections (Selections *selections);
 extern void     ms_printselections (Selections *selections);
+
+/* Leap second declarations, implementation in gentutils.c */
+typedef struct LeapSecond_s
+{
+  hptime_t leapsecond;
+  int32_t  TAIdelta;
+  struct LeapSecond_s *next;
+} LeapSecond;
+
+extern LeapSecond *leapsecondlist;
+extern int ms_readleapseconds (char *envvarname);
+extern int ms_readleapsecondfile (char *filename);
 
 /* Generic byte swapping routines */
 extern void     ms_gswap2 ( void *data2 );
