@@ -1,10 +1,9 @@
-.TH MINISEED2DMC 1 2011/03/21
+.TH MINISEED2DMC 1 2017/01/17
 .SH NAME
 miniseed2dmc \- Transfer Mini-SEED data to a DMC
 .SH SYNOPSIS
 .nf
 miniseed2dmc [options] host:port files|directories ...
-q
 .fi
 .SH DESCRIPTION
 \fBminiseed2dmc\fP transfers selected Mini-SEED data records from the
@@ -16,8 +15,8 @@ Mini-SEED to be transfered can be identified 3 different ways:
 .nf
 1 - files on the command line
 2 - directories on the command line which will be searched
-3 - files containing lists of files and/or directories 
-.fi 
+3 - files containing lists of files and/or directories
+.fi
 
 If directories are specified on the command line or in list files all
 files they contain are assumed to be input files and all
@@ -53,7 +52,7 @@ Print the program version and exit.
 Print the program help/usage and exit.
 
 .IP "-v"
-Be more verbose.  This flag can be used multiple times ("-v -v" or 
+Be more verbose.  This flag can be used multiple times ("-v -v" or
 "-vv") for more verbosity.
 
 .IP "-p"
@@ -112,13 +111,15 @@ statistics during transmission, default is 30 seconds.  This option
 implies the \fB-I\fP option.
 
 .IP "-w \fIworkdir\fP"
-The working directory is where the state file and SYNC listing will be
-written, default is the current working directory.  A recommended 
+The working directory is where the (default) state file and SYNC
+listing will be written, default is the current working directory.
 
 .IP "-S \fIstatefile\fP"
-A state file is written to track the status of the transmission, a
-uniqe state file should be used for each separate data set.  By
-default a file named "statefile" will be written to the \fBworkdir\fP.
+A state file is written to track the status of the transmission.  It
+is recommended to use a unique state file for each separate data set.
+By default a file named "statefile" will be written to the
+\fBworkdir\fP.  If the specified value is not an absolute path it is
+relative to the current working directory (not \fBworkdir\fP).
 
 .IP "-l \fIlistfile\fP"
 The \fIlistfile\fP is a file containing a list of files and/or
@@ -152,7 +153,7 @@ Example selection file entires (the first four fields are required)
 .nf
 #net sta  loc  chan  qual  start             end
 IU   ANMO *    BH?
-II   *    *    *     Q     
+II   *    *    *     Q
 IU   COLA 00   LH[ENZ] R
 IU   COLA 00   LHZ   *     2008,100,10,00,00 2008,100,10,30,00
 .fi

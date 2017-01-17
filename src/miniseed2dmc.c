@@ -1563,7 +1563,7 @@ usage ()
                    " -mr rate       Maximum transmission rate in bits/second, no limit by default\n"
                    " -I             Print transfer rate during transmission\n"
                    " -It interval   Interval in seconds to print transfer statistics (default: %d)\n"
-                   " -w workdir     Location to write SYNC and state files, default is current dir\n"
+                   " -w workdir     Location to write SYNC and (default) state file\n"
                    " -S statefile   File to track transfer status, default is workdir/statefile\n"
                    " -l listfile    File containing a list of input files and/or directories\n"
                    " -s file        Specify a file containing data selection criteria\n"
