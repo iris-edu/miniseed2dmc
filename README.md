@@ -1,8 +1,8 @@
-# miniseed2dmc - send Mini-SEED to a Data Managment Center
+# miniseed2dmc - send Mini-SEED to a Data Management Center
 
-This program transfers selected Mini-SEED data records from the localxi
-computer to a remote Data Managment Center.  Prior to using this program
-coordination with DMC is required.
+This program transfers selected Mini-SEED data records from the local
+computer to a remote Data Management Center.  Prior to using this program
+coordination with the DMC is required.
 
 To track the Mini-SEED data transferred the program writes SYNC files
 representing the data coverage.  Additionally, a state file is maintained
@@ -12,7 +12,7 @@ More importantly it allows the client to determine when all records from
 a given data set have been transferred preventing them from being transferred
 again erroneously.
 
-For usage infromation see the [miniseed2dmc manual](doc/miniseed2dmc.md) in the
+For usage information see the [miniseed2dmc manual](doc/miniseed2dmc.md) in the
 'doc' directory.
 
 ## Building

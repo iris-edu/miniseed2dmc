@@ -18,7 +18,7 @@ miniseed2dmc [options] host:port files|directories ...
 
 ## <a id='description'>Description</a>
 
-<p ><b>miniseed2dmc</b> transfers selected Mini-SEED data records from the local computer to a remote Data Managment Center.  Prior to using this program coordination with DMC is required and the user must have been assigned a host and port indicating where the data should be sent.</p>
+<p ><b>miniseed2dmc</b> transfers selected Mini-SEED data records from the local computer to a remote Data Management Center.  Prior to using this program coordination with DMC is required and the user must have been assigned a host and port indicating where the data should be sent.</p>
 
 <p >Mini-SEED to be transfered can be identified 3 different ways:</p>
 <pre >
@@ -103,7 +103,7 @@ miniseed2dmc [options] host:port files|directories ...
 
 <b>-s </b><i>selectfile</i>
 
-<p style="padding-left: 30px;">Limit processing to Mini-SEED records that match a selection in the specified file.  The selection file contains parameters to match the network, station, location, channel, quality and time range for input records.  As a special case, specifying "-" will result in selection lines being read from stdin.  For more details see the \fBSELECTION FILE\fR section below.</p>
+<p style="padding-left: 30px;">Limit processing to Mini-SEED records that match a selection in the specified file.  The selection file contains parameters to match the network, station, location, channel, quality and time range for input records.  As a special case, specifying "-" will result in selection lines being read from stdin.  For more details see the <b>SELECTION FILE</b> section below.</p>
 
 <b></b><i>host:port</i>
 
