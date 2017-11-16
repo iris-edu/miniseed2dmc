@@ -686,7 +686,7 @@ recoverstate (char *statefile)
       return 0;
   }
 
-  lprintf (1, "Recovering state");
+  lprintf (1, "Recovering state from file %s", statefile);
 
   count = 1;
 
@@ -695,7 +695,7 @@ recoverstate (char *statefile)
     fields = sscanf (line, "%s %lld %lld %llu %llu\n",
                      filename, &offset, &size, &bytecount, &recordcount);
 
-    if (fields < 0)
+    if (fields < 0 || offset == 0)
       continue;
 
     if (fields < 5)
@@ -719,6 +719,7 @@ recoverstate (char *statefile)
       /* Compare file names and update offset if match found */
       if (!strcmp (filename, file->name))
       {
+        lprintf (3, "Recovering file %s from state", filename);
         file->offset = offset;
         file->bytecount = bytecount;
         file->recordcount = recordcount;
