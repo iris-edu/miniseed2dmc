@@ -686,7 +686,7 @@ recoverstate (char *statefile)
       return 0;
   }
 
-  lprintf (1, "Recovering state...");
+  lprintf (1, "Recovering state from file %s", statefile);
 
   count = 1;
 
