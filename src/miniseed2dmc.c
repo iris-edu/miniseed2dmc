@@ -1510,7 +1510,7 @@ lprintf (int level, const char *fmt, ...)
   int rv = 0;
   char message[1024];
   va_list argptr;
-  struct tm *tp;
+  struct tm tp;
   time_t curtime;
 
   char *day[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -1521,15 +1521,15 @@ lprintf (int level, const char *fmt, ...)
   {
     /* Build local time string and generate final output */
     curtime = time (NULL);
-    tp = localtime (&curtime);
+    localtime_r (&curtime, &tp);
 
     va_start (argptr, fmt);
     rv = vsnprintf (message, sizeof (message), fmt, argptr);
     va_end (argptr);
 
     printf ("%3.3s %3.3s %2.2d %2.2d:%2.2d:%2.2d %4.4d - %s: %s\n",
-            day[tp->tm_wday], month[tp->tm_mon], tp->tm_mday,
-            tp->tm_hour, tp->tm_min, tp->tm_sec, tp->tm_year + 1900,
+            day[tp.tm_wday], month[tp.tm_mon], tp.tm_mday,
+            tp.tm_hour, tp.tm_min, tp.tm_sec, tp.tm_year + 1900,
             PACKAGE, message);
 
     fflush (stdout);
