@@ -1,3 +1,6 @@
+2019.135:
+	- Fix timestamps in name of generated SYNC files.
+
 2017.017:
 	- Update libmseed to 2.18.
 	- Update libdali to 1.7.

@@ -529,9 +529,9 @@ writesync (MSTraceList *mstl, time_t start, time_t end)
   MSTraceSeg *seg;
   FILE *sf = 0;
   time_t now;
-  struct tm *nt;
-  struct tm *st;
-  struct tm *et;
+  struct tm nt;
+  struct tm st;
+  struct tm et;
   char yearday[10];
   char starttime[50];
   char endtime[50];
@@ -542,22 +542,22 @@ writesync (MSTraceList *mstl, time_t start, time_t end)
 
   /* Generate current time stamp */
   now = time (NULL);
-  nt = localtime (&now);
-  nt->tm_year += 1900;
-  nt->tm_yday += 1;
-  snprintf (yearday, sizeof (yearday), "%04d,%03d", nt->tm_year, nt->tm_yday);
+  localtime_r (&now, &nt);
+  nt.tm_year += 1900;
+  nt.tm_yday += 1;
+  snprintf (yearday, sizeof (yearday), "%04d,%03d", nt.tm_year, nt.tm_yday);
 
   /* Generate sync file name */
-  st = localtime (&start);
-  st->tm_year += 1900;
-  st->tm_mon += 1;
-  et = localtime (&end);
-  et->tm_year += 1900;
-  et->tm_mon += 1;
+  localtime_r (&start, &st);
+  st.tm_year += 1900;
+  st.tm_mon += 1;
+  localtime_r (&end, &et);
+  et.tm_year += 1900;
+  et.tm_mon += 1;
   snprintf (filename, sizeof (filename),
             "%s/%04d-%02d-%02dT%02d:%02d:%02d--%04d-%02d-%02dT%02d:%02d:%02d.sync", workdir,
-            st->tm_year, st->tm_mon, st->tm_mday, st->tm_hour, st->tm_min, st->tm_sec,
-            et->tm_year, et->tm_mon, et->tm_mday, et->tm_hour, et->tm_min, et->tm_sec);
+            st.tm_year, st.tm_mon, st.tm_mday, st.tm_hour, st.tm_min, st.tm_sec,
+            et.tm_year, et.tm_mon, et.tm_mday, et.tm_hour, et.tm_min, et.tm_sec);
 
   /* Open sync file */
   if (!(sf = fopen (filename, "w")))
